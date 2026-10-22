@@ -68,6 +68,7 @@ export type RuntimeNotifier = {
       ptyId: string
       title?: string | null
       cwd?: string
+      freshAgentLaunch?: boolean
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent

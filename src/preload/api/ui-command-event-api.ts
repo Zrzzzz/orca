@@ -187,6 +187,7 @@ export type UiCommandEventApi = {
       env?: Record<string, string>
       launchConfig?: SleepingAgentLaunchConfig
       resumeProviderSession?: AgentProviderSessionMetadata
+      freshAgentLaunch?: boolean
       launchToken?: string
       launchAgent?: TuiAgent
       viewMode?: 'terminal' | 'chat'
