@@ -1,0 +1,67 @@
+name: Personal macOS arm64 development build
+
+on:
+  push:
+    branches: [build/mac-arm64-chat-workflows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      ORCA_BACKGROUND_LAUNCH: '1'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      SOURCE_COMMIT: f72369581f5dce1636cc8ae0084a2a9d683f51f6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: f72369581f5dce1636cc8ae0084a2a9d683f51f6
+          fetch-depth: 1
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Enable pinned package manager
+        run: corepack enable
+      - name: Verify build architecture
+        run: |
+          test "$(uname -m)" = arm64
+          node -e "if (process.arch !== 'arm64') process.exit(1)"
+      - name: Install desktop dependencies
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: pnpm install --frozen-lockfile --cpu=current,x64,arm64
+      - uses: ./.github/actions/install-mobile-dependencies
+      - name: Compile application and native helpers
+        run: |
+          pnpm run build:desktop:assets
+          pnpm run build:native
+          pnpm run ensure:electron-runtime
+      - name: Package development build
+        run: |
+          node --input-type=module -e "import { getLocalBuildIdentity } from './config/scripts/build-mac-local.mjs'; import { appendFileSync } from 'node:fs'; const identity = getLocalBuildIdentity(); appendFileSync(process.env.GITHUB_ENV, 'ORCA_BUILD_COMMIT=' + identity.commit + '\nORCA_LOCAL_BUILD_VERSION=' + identity.version + '\n')"
+      - name: Build arm64 DMG and ZIP
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --mac dmg zip --arm64 --publish never
+      - name: Verify packaged architecture and record identity
+        run: |
+          file dist/mac-arm64/Orca.app/Contents/MacOS/Orca
+          lipo -verify_arch arm64 dist/mac-arm64/Orca.app/Contents/MacOS/Orca
+          git rev-parse HEAD > dist/SOURCE_COMMIT.txt
+          shasum -a 256 dist/*.dmg dist/*.zip > dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: orca-macos-arm64-f72369581f
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SOURCE_COMMIT.txt
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
