@@ -10,13 +10,15 @@ import type { NativeChatSendOptions } from './native-chat-input-clear'
 let drafts: NativeChatTerminalQueuedDrafts
 let refuseWrites: () => void
 let mobile = false
+let queueEnabled = true
 let settleSend: (accepted: boolean) => void
 let delayCancellation = false
 const sendHandles: { finish: (accepted: boolean) => void; cancel: ReturnType<typeof vi.fn> }[] = []
 const writes: { ptyId: string; text: string }[] = []
 
 vi.mock('@/store', () => ({
-  useAppStore: (select: (state: unknown) => unknown) => select({ settings: {} })
+  useAppStore: (select: (state: unknown) => unknown) =>
+    select({ settings: { nativeChatQueueFollowUps: queueEnabled } })
 }))
 vi.mock('@/lib/pane-manager/mobile-driver-state', () => ({
   getDriverForPty: () => ({ kind: mobile ? 'mobile' : 'desktop' })
@@ -74,6 +76,7 @@ beforeEach(() => {
   sendHandles.length = 0
   delayCancellation = false
   mobile = false
+  queueEnabled = true
 })
 
 async function enqueue(
@@ -367,5 +370,129 @@ it('does not start writing if Stop lands while the persistent claim is awaiting'
   await act(async () => result.current.pause())
   await act(async () => release())
   expect(writes).toEqual([])
+  expect((await drafts.read(args.scope)).messages[0].state).toBe('waiting')
+})
+
+it.each([{ claimedAt: 'invalid' }, { claimedAt: {} }, { claimId: 123 }, { editId: [] }])(
+  'rejects malformed persisted queue metadata %j without scheduling recovery',
+  async (metadata) => {
+    const storage = createMemoryNativeChatComposerDraftStorage()
+    drafts = new NativeChatTerminalQueuedDrafts(storage)
+    const args = props()
+    await storage.write(args.scope, {
+      text: JSON.stringify({
+        messages: [
+          {
+            id: 'draft',
+            text: 'Saved draft',
+            imagePaths: [],
+            state: 'sending',
+            ...metadata
+          }
+        ]
+      }),
+      images: [],
+      savedAt: 1
+    })
+    await expect(drafts.read(args.scope)).rejects.toThrow('Invalid queued draft')
+    const recovery = vi.spyOn(drafts, 'recover')
+    const { result } = renderHook(useNativeChatTerminalQueuedMessages, { initialProps: args })
+    await act(async () => {})
+    expect(await result.current.enqueue('Preserve composer', [])).toBe(false)
+    expect(recovery).not.toHaveBeenCalled()
+  }
+)
+
+it.each([false, true])(
+  'allows direct sends before queue readiness when disabled=%s',
+  async (disabled) => {
+    queueEnabled = !disabled
+    vi.spyOn(drafts, 'read').mockImplementation(() => new Promise(() => {}))
+    const args = { ...props(), working: disabled, ready: false }
+    const { result } = renderHook(useNativeChatTerminalQueuedMessages, { initialProps: args })
+    expect(result.current.enqueue('Direct send', [])).toBeNull()
+  }
+)
+
+it('does not carry an empty Stop pause into the next queued turn', async () => {
+  const args = props()
+  const { result, rerender } = renderHook(useNativeChatTerminalQueuedMessages, {
+    initialProps: args
+  })
+  await act(async () => result.current.pause())
+  expect((await drafts.read(args.scope)).paused).toBe(false)
+  await enqueue(result)
+  rerender({ ...args, working: false, completedTurn: 'finished', completedAt: 2 })
+  await waitFor(() => expect(writes).toHaveLength(1))
+  await act(async () => settleSend(true))
+})
+
+it('releases its edit on unmount and lets the restored queue drain', async () => {
+  const args = props()
+  const first = renderHook(useNativeChatTerminalQueuedMessages, { initialProps: args })
+  await enqueue(first.result)
+  const id = first.result.current.controller.cards[0].messageId
+  await act(async () => first.result.current.controller.edit(id))
+  first.unmount()
+  expect((await drafts.read(args.scope)).messages[0].state).toBe('waiting')
+  const restored = renderHook(useNativeChatTerminalQueuedMessages, {
+    initialProps: { ...args, working: false, completedTurn: 'finished', completedAt: 2 }
+  })
+  await waitFor(() => expect(writes).toHaveLength(1))
+  await act(async () => settleSend(true))
+  restored.unmount()
+})
+
+it('preserves a newer renderer edit takeover when the old editor unmounts', async () => {
+  const args = props()
+  const first = renderHook(useNativeChatTerminalQueuedMessages, { initialProps: args })
+  await enqueue(first.result)
+  const id = first.result.current.controller.cards[0].messageId
+  await act(async () => first.result.current.controller.edit(id))
+  const oldToken = (await drafts.read(args.scope)).messages[0].editId
+  const second = renderHook(useNativeChatTerminalQueuedMessages, { initialProps: args })
+  await waitFor(() => expect(second.result.current.controller.cards).toHaveLength(1))
+  await act(async () => second.result.current.controller.edit(id))
+  const newerToken = (await drafts.read(args.scope)).messages[0].editId
+  expect(newerToken).not.toBe(oldToken)
+  first.unmount()
+  expect((await drafts.read(args.scope)).messages[0]).toMatchObject({
+    state: 'editing',
+    editId: newerToken
+  })
+  act(() => second.result.current.controller.editor?.change('Newer edit'))
+  await act(async () => second.result.current.controller.editor?.save())
+  expect((await drafts.read(args.scope)).messages[0]).toMatchObject({
+    state: 'waiting',
+    text: 'Newer edit'
+  })
+  second.unmount()
+})
+
+it('releases an edit whose acquisition completes after unmount', async () => {
+  const args = props()
+  const { result, unmount } = renderHook(useNativeChatTerminalQueuedMessages, {
+    initialProps: args
+  })
+  await enqueue(result)
+  const id = result.current.controller.cards[0].messageId
+  const change = drafts.change.bind(drafts)
+  let release: () => void = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  vi.spyOn(drafts, 'change').mockImplementationOnce(async (...args) => {
+    await pending
+    return change(...args)
+  })
+  let editing: Promise<void> | undefined
+  act(() => {
+    editing = result.current.controller.edit(id)
+  })
+  unmount()
+  await act(async () => {
+    release()
+    await editing
+  })
   expect((await drafts.read(args.scope)).messages[0].state).toBe('waiting')
 })

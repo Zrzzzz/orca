@@ -255,17 +255,17 @@ export function useNativeChatTerminalQueuedMessages(args: Args): {
 
   const enqueue = useCallback(
     (text: string, imagePaths: string[]): Promise<boolean> | null => {
+      if (
+        (!enabled || (!latest.current.working && !queue?.awaitingTurn)) &&
+        (queue?.messages.length ?? 0) === 0
+      ) {
+        return null
+      }
       if (!queue || !latest.current.ready) {
         if (storageFailed.current) {
           reportError()
         }
         return Promise.resolve(false)
-      }
-      if (
-        (!enabled && queue.messages.length === 0) ||
-        (!args.working && !queue.awaitingTurn && queue.messages.length === 0)
-      ) {
-        return null
       }
       if (enqueueing.current) {
         return Promise.resolve(false)
@@ -290,7 +290,7 @@ export function useNativeChatTerminalQueuedMessages(args: Args): {
           enqueueing.current = false
         })
     },
-    [queue, enabled, args.working, change]
+    [queue, enabled, change]
   )
 
   return {
@@ -300,7 +300,7 @@ export function useNativeChatTerminalQueuedMessages(args: Args): {
       stopEpoch.current += 1
       inFlight.current?.handle.cancel(true)
       void change((next) => {
-        next.paused = true
+        next.paused = next.messages.length > 0
       }).catch(reportError)
     }
   }

@@ -57,18 +57,34 @@ function readQueue(stored: unknown): TerminalQueuedDrafts {
       typeof value.text !== 'string' ||
       !Array.isArray(value.imagePaths) ||
       !value.imagePaths.every((path: unknown) => typeof path === 'string') ||
-      !['waiting', 'editing', 'sending', 'unknown'].includes(value.state)
+      !['waiting', 'editing', 'sending', 'unknown'].includes(value.state) ||
+      (value.claimedAt !== undefined &&
+        (typeof value.claimedAt !== 'number' || !Number.isFinite(value.claimedAt))) ||
+      (value.claimId !== undefined && typeof value.claimId !== 'string') ||
+      (value.editId !== undefined && typeof value.editId !== 'string')
     ) {
       throw new Error('Invalid queued draft')
     }
-    messages.push(value)
+    messages.push({
+      id: value.id,
+      text: value.text,
+      imagePaths: value.imagePaths,
+      state: value.state,
+      ...(value.claimedAt !== undefined ? { claimedAt: value.claimedAt } : {}),
+      ...(value.claimId !== undefined ? { claimId: value.claimId } : {}),
+      ...(value.editId !== undefined ? { editId: value.editId } : {})
+    })
   }
   return {
     messages,
     paused: 'paused' in parsed && parsed.paused === true,
     awaitingTurn: 'awaitingTurn' in parsed && parsed.awaitingTurn === true,
     afterTurnAt:
-      'afterTurnAt' in parsed && typeof parsed.afterTurnAt === 'number' ? parsed.afterTurnAt : null,
+      'afterTurnAt' in parsed &&
+      typeof parsed.afterTurnAt === 'number' &&
+      Number.isFinite(parsed.afterTurnAt)
+        ? parsed.afterTurnAt
+        : null,
     afterTurn:
       'afterTurn' in parsed && typeof parsed.afterTurn === 'string' ? parsed.afterTurn : null
   }

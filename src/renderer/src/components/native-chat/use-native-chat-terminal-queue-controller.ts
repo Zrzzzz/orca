@@ -1,7 +1,10 @@
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { translate } from '@/i18n/i18n'
-import type { TerminalQueuedDrafts } from './native-chat-terminal-queued-drafts'
+import {
+  terminalQueuedDrafts,
+  type TerminalQueuedDrafts
+} from './native-chat-terminal-queued-drafts'
 import type { StructuredAgentSessionQueuedMessagesController } from './use-structured-agent-session-queued-messages'
 import type { QueuedMessageInlineEditor } from './use-structured-agent-session-queued-edit'
 
@@ -31,6 +34,29 @@ export function useNativeChatTerminalQueueController({
     baseText: string
     editId: string
   } | null>(null)
+  const ownedEdit = useRef<{ scope: string; id: string; editId: string } | null>(null)
+  const releaseEdit = (lease: { scope: string; id: string; editId: string }) =>
+    terminalQueuedDrafts().change(lease.scope, (next) => {
+      const message = next.messages.find((message) => message.id === lease.id)
+      if (message?.state === 'editing' && message.editId === lease.editId) {
+        message.state = 'waiting'
+        delete message.editId
+      }
+    })
+  const errorReporter = useRef(reportError)
+  useLayoutEffect(() => {
+    errorReporter.current = reportError
+  })
+  useLayoutEffect(() => {
+    setEdit(null)
+    return () => {
+      const lease = ownedEdit.current
+      ownedEdit.current = null
+      if (lease) {
+        void releaseEdit(lease).catch(() => errorReporter.current())
+      }
+    }
+  }, [scope])
   const [saving, setSaving] = useState(false)
   const waiting =
     queue?.messages.filter(
@@ -52,7 +78,12 @@ export function useNativeChatTerminalQueueController({
               message.state = 'waiting'
             }
           })
-            .then(() => setEdit(null))
+            .then(() => {
+              if (ownedEdit.current?.editId === editable.editId) {
+                ownedEdit.current = null
+                setEdit(null)
+              }
+            })
             .catch(reportError)
         },
         save: () => {
@@ -69,7 +100,12 @@ export function useNativeChatTerminalQueueController({
             message.text = editable.text
             message.state = 'waiting'
           })
-            .then(() => setEdit(null))
+            .then(() => {
+              if (ownedEdit.current?.editId === editable.editId) {
+                ownedEdit.current = null
+                setEdit(null)
+              }
+            })
             .catch(reportError)
             .finally(() => setSaving(false))
         }
@@ -155,7 +191,12 @@ export function useNativeChatTerminalQueueController({
     edit: async (id) => {
       const message = waiting.find((message) => message.id === id)
       if (message) {
+        if (ownedEdit.current) {
+          return
+        }
         const editId = createBrowserUuid()
+        const lease = { scope, id, editId }
+        ownedEdit.current = lease
         try {
           await change((next) => {
             const selected = next.messages.find((message) => message.id === id)
@@ -165,8 +206,15 @@ export function useNativeChatTerminalQueueController({
             selected.state = 'editing'
             selected.editId = editId
           })
+          if (ownedEdit.current !== lease) {
+            await releaseEdit(lease)
+            return
+          }
           setEdit({ scope, id, text: message.text, baseText: message.text, editId })
         } catch {
+          if (ownedEdit.current === lease) {
+            ownedEdit.current = null
+          }
           reportError()
         }
       }
