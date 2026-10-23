@@ -5,6 +5,7 @@ import {
 } from './comment-markdown-mermaid-policy'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkBreaks from 'remark-breaks'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from 'rehype-sanitize'
@@ -84,6 +85,7 @@ const commentMarkdownFileUriUrlTransform: UrlTransform = (value, key, node) => {
 const remarkPlugins = [
   remarkGfm,
   remarkAutolinkLiteralProseBoundary,
+  remarkCjkFriendly,
   remarkGitHubCallouts,
   remarkBreaks
 ]

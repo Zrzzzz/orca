@@ -42,6 +42,20 @@ const REPLY = [
 ].join('\n')
 
 describe('growing comment markdown', () => {
+  it('keeps CJK quoted strong spans when a streamed response finishes', () => {
+    const view = render(<CommentMarkdown content="这是**“甲”**和" growing />)
+    expect(view.container.querySelector('strong')?.textContent).toBe('“甲”')
+    const complete = '这是**“甲”**和**“乙”**内容'
+    view.rerender(<CommentMarkdown content={complete} growing />)
+    expect(
+      Array.from(view.container.querySelectorAll('strong'), (node) => node.textContent)
+    ).toEqual(['“甲”', '“乙”'])
+    view.rerender(<CommentMarkdown content={complete} />)
+    expect(
+      Array.from(view.container.querySelectorAll('strong'), (node) => node.textContent)
+    ).toEqual(['“甲”', '“乙”'])
+  })
+
   it('renders a streamed reply to the same document as the finished one', () => {
     const whole = render(<CommentMarkdown content={REPLY} variant="document" />)
     const expected = blocksOf(whole.container)
