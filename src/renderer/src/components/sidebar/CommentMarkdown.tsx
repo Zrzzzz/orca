@@ -5,8 +5,8 @@ import {
 } from './comment-markdown-mermaid-policy'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkBreaks from 'remark-breaks'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from 'rehype-sanitize'
 import remend from 'remend'
@@ -84,8 +84,8 @@ const commentMarkdownFileUriUrlTransform: UrlTransform = (value, key, node) => {
 // with existing plain-text comments that rely on newline formatting.
 const remarkPlugins = [
   remarkGfm,
-  remarkAutolinkLiteralProseBoundary,
   remarkCjkFriendly,
+  remarkAutolinkLiteralProseBoundary,
   remarkGitHubCallouts,
   remarkBreaks
 ]
