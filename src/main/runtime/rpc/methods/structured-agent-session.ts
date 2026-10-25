@@ -1,3 +1,4 @@
+import { STRUCTURED_REWIND_FILE_METHODS } from './structured-rewind-files'
 import {
   clientReadsCurrentRequests,
   STRUCTURED_AGENT_SESSION_CURRENT_REQUESTS_METHODS
@@ -75,6 +76,7 @@ import {
 } from './structured-agent-session-close-before-create'
 
 export const STRUCTURED_AGENT_SESSION_METHODS = [
+  ...STRUCTURED_REWIND_FILE_METHODS,
   defineMethod({
     name: 'agentSession.rewind',
     permission: 'workspace',
