@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import path from 'node:path'
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { scanWorkspacePorts } from './local-workspace-port-scanner'
 import { attributePortToWorkspace, isContainerProcess } from './local-workspace-port-attribution'
 import {
@@ -214,6 +216,69 @@ describe('scanWorkspacePorts attribution work', () => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
     runPortScanCommandMock.mockReset()
+  })
+
+  it('attributes real and symlink paths to the registered workspace and reconciles its URLs', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'orca-port-alias-')))
+    try {
+      const target = path.join(root, 'project')
+      const alias = path.join(root, 'linked-project')
+      await mkdir(path.join(target, 'app'), { recursive: true })
+      await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir')
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      const probe = { id: 'workspace', repoId: 'repo', displayName: 'Project', path: alias }
+      const missing = { ...probe, id: 'missing', path: path.join(root, 'missing') }
+      runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => ({
+        stdout:
+          command === 'lsof' && args.includes('-iTCP')
+            ? [
+                'p123',
+                'cpython',
+                'n127.0.0.1:8765',
+                'p124',
+                'cnode',
+                'n127.0.0.1:8766',
+                'p125',
+                'cnode',
+                'n127.0.0.1:8767'
+              ].join('\n')
+            : command === 'lsof'
+              ? [
+                  `p123`,
+                  `n${path.join(target, 'app')}`,
+                  'p124',
+                  `n${alias}`,
+                  'p125',
+                  `n${target}-other`
+                ].join('\n')
+              : '',
+        spawnMs: 5
+      }))
+      const watcher = urlWatcherStub()
+      const scan = await scanWorkspacePorts([probe, missing], watcher)
+      expect(scan.ports).toEqual([
+        expect.objectContaining({
+          port: 8765,
+          kind: 'workspace',
+          owner: expect.objectContaining({ worktreeId: probe.id, path: alias })
+        }),
+        expect.objectContaining({
+          port: 8766,
+          kind: 'workspace',
+          owner: expect.objectContaining({ worktreeId: probe.id, path: alias })
+        }),
+        expect.objectContaining({ port: 8767, kind: 'external' })
+      ])
+      expect(watcher.reconcileScan).toHaveBeenCalledWith(
+        [probe.id],
+        [
+          { port: 8765, pid: 123 },
+          { port: 8766, pid: 124 }
+        ]
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('normalizes worktree paths once per scan instead of once per port phase', async () => {

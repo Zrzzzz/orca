@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { realpath } from 'node:fs/promises'
 import type {
   WorkspacePort,
   WorkspacePortOwner,
@@ -39,6 +40,24 @@ export function normalizeWorkspacePortProbes(
     worktree,
     normalizedPath: normalizeComparablePath(worktree.path)
   }))
+}
+
+export async function resolveWorkspacePortProbes(
+  worktrees: readonly WorkspacePortProbe[]
+): Promise<NormalizedWorkspacePortProbe[]> {
+  const probes = normalizeWorkspacePortProbes(worktrees)
+  const aliases = await Promise.all(
+    probes.map(async (probe) => {
+      try {
+        const normalizedPath = normalizeComparablePath(await realpath(probe.worktree.path))
+        return normalizedPath === probe.normalizedPath ? [] : [{ ...probe, normalizedPath }]
+      } catch {
+        // Unavailable directories still retain their lexical path for attribution.
+        return []
+      }
+    })
+  )
+  return [...probes, ...aliases.flat()]
 }
 
 function attributePortToNormalizedWorkspaces(
