@@ -3,7 +3,10 @@
 export const WORKSPACE_PORTS_HOST_SCOPED_RUNTIME_CAPABILITY =
   'workspace-ports.host-scoped.v1' as const
 
+export const WORKSPACE_PORT_FORWARD_RUNTIME_CAPABILITY = 'workspace-ports.forward.v1' as const
+
 export const WORKSPACE_PORTS_RUNTIME_CAPABILITIES = [
+  WORKSPACE_PORT_FORWARD_RUNTIME_CAPABILITY,
   'workspace-ports.v1',
   WORKSPACE_PORTS_HOST_SCOPED_RUNTIME_CAPABILITY
 ] as const

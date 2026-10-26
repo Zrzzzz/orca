@@ -254,6 +254,9 @@ vi.mock('../workspace-space', () => ({
 vi.mock('../workspace-ports', () => ({
   registerWorkspacePortHandlers: registerWorkspacePortHandlersMock
 }))
+vi.mock('../workspace-port-forward', () => ({
+  registerWorkspacePortForwardHandler: vi.fn()
+}))
 
 vi.mock('../localhost-worktree-labels', () => ({
   registerLocalhostWorktreeLabelHandlers: registerLocalhostWorktreeLabelHandlersMock

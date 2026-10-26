@@ -3,6 +3,7 @@ import type { WorkspacePortAdvertisedUrlChangedEvent } from '../../shared/worksp
 import type { PreloadApi } from '../api-types'
 
 export const workspacePortsApi = {
+  forward: (args) => ipcRenderer.invoke('workspacePorts:forward', args),
   scan: (args) => ipcRenderer.invoke('workspacePorts:scan', args),
   kill: (args) => ipcRenderer.invoke('workspacePorts:kill', args),
   probePage: (args) => ipcRenderer.invoke('workspacePorts:probePage', args),

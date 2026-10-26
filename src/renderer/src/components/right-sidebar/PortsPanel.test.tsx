@@ -409,6 +409,38 @@ describe('PortsPanel runtime routing', () => {
     expect(createBrowserTab).not.toHaveBeenCalled()
   })
 
+  it('opens a desktop forwarded address without requesting a remote browser', async () => {
+    const forward = vi.fn().mockResolvedValue({ localPort: 49152 })
+    window.api.workspacePorts.forward = forward
+    const createBrowserTab = vi.fn()
+    await expect(
+      openWorkspacePortInBrowser({
+        port: workspacePort,
+        runtimeTarget: { kind: 'environment', environmentId: 'env-1' },
+        createBrowserTab,
+        setRemoteBrowserPageHandle: vi.fn()
+      })
+    ).resolves.toEqual({ ok: true })
+    expect(forward).toHaveBeenCalledWith({ environmentId: 'env-1', host: '127.0.0.1', port: 63468 })
+    expect(openUrl).toHaveBeenCalledWith('http://127.0.0.1:49152')
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(createBrowserTab).not.toHaveBeenCalled()
+  })
+
+  it('does not open local localhost or a remote browser when forwarding fails', async () => {
+    window.api.workspacePorts.forward = vi.fn().mockRejectedValue(new Error('Update Orca Server'))
+    await expect(
+      openWorkspacePortInBrowser({
+        port: workspacePort,
+        runtimeTarget: { kind: 'environment', environmentId: 'env-1' },
+        createBrowserTab: vi.fn(),
+        setRemoteBrowserPageHandle: vi.fn()
+      })
+    ).resolves.toEqual({ ok: false, reason: 'Update Orca Server' })
+    expect(openUrl).not.toHaveBeenCalled()
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
   it('opens workspace ports in the system browser when link routing is off', async () => {
     const createBrowserTab = vi.fn()
     const setRemoteBrowserPageHandle = vi.fn()

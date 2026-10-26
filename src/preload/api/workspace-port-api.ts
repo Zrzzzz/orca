@@ -13,6 +13,12 @@ import type {
 } from '../../shared/workspace-ports'
 
 export type WorkspacePortsApi = {
+  /** Desktop-only: browser clients cannot bind a local TCP listener. */
+  forward?: (args: {
+    environmentId: string
+    host: '127.0.0.1' | '::1'
+    port: number
+  }) => Promise<{ localPort: number }>
   scan: (args: WorkspacePortScanRequest) => Promise<WorkspacePortScanResult>
   kill: (args: WorkspacePortKillRequest) => Promise<WorkspacePortKillResult>
   probePage: (args: WorkspacePortPageProbeRequest) => Promise<WorkspacePortPageProbeResult>

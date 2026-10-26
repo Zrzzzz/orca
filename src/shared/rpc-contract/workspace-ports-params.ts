@@ -1,6 +1,15 @@
 import { z } from 'zod'
 import { OptionalString, requiredNumber, requiredString } from './rpc-param-primitives'
 
+export const WorkspacePortForwardParams = z.object({
+  host: z.enum(['127.0.0.1', '::1']),
+  port: z.number().int().min(1).max(65535)
+})
+
+export const WorkspacePortForwardRequest = WorkspacePortForwardParams.extend({
+  environmentId: z.string().min(1)
+})
+
 export const WorkspacePortScanParams = z.object({
   repoId: OptionalString
 })

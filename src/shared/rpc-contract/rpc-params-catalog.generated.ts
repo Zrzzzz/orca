@@ -636,6 +636,7 @@ import {
   LayoutUnsubscribeParams
 } from './workspace-layout-params'
 import {
+  WorkspacePortForwardParams,
   WorkspacePortKillHostParams,
   WorkspacePortKillParams,
   WorkspacePortProbePageParams,
@@ -1428,6 +1429,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'updater.download': null,
   'updater.getStatus': null,
   'updater.install': null,
+  'workspacePorts.forward': WorkspacePortForwardParams,
   'workspacePorts.kill': WorkspacePortKillParams,
   'workspacePorts.killHost': WorkspacePortKillHostParams,
   'workspacePorts.probePage': WorkspacePortProbePageParams,

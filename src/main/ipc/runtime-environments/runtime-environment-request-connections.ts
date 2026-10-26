@@ -1,4 +1,5 @@
 import type { PairedRuntimeConnection } from '../../../shared/paired-runtime-connection'
+import { closeWorkspacePortForwardsForEnvironment } from '../../ports/workspace-port-forward-registry'
 import { resolveEnvironment } from '../../../shared/runtime-environment-store'
 import { getPreferredPairedRuntimeConnection } from '../../../shared/runtime-environments'
 import type { RuntimeHostStatusOwner } from '../../../shared/runtime-host-status-owner'
@@ -128,6 +129,7 @@ export function sendRemoteRuntimeConnectionRequest<TResult>(
 }
 
 export function closeRemoteRuntimeRequestConnection(environmentId: string): void {
+  closeWorkspacePortForwardsForEnvironment(environmentId)
   const status = statusOwners.get(environmentId)
   statusOwners.delete(environmentId)
   status?.owner.dispose()

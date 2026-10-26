@@ -12,6 +12,7 @@ import type {
 import type { LocalhostWorktreeLabelRoute } from '../../../shared/localhost-worktree-labels'
 import { runWorkspacePortScanForTarget } from './workspace-port-scan-client'
 import { browserUrlForPort } from './workspace-port-urls'
+import { openForwardedWorkspacePort } from './workspace-port-forward-open'
 import { createBrowserUuid } from './browser-uuid'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { RUNTIME_BROWSER_UNAVAILABLE_MESSAGE } from './client-creation-action-policy'
@@ -124,6 +125,9 @@ export async function openWorkspacePortInBrowser(args: {
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!args.runtimeTarget) {
     return { ok: false, reason: WORKSPACE_PORT_TARGET_UNAVAILABLE_REASON }
+  }
+  if (args.runtimeTarget.kind === 'environment' && window.api.workspacePorts.forward) {
+    return openForwardedWorkspacePort(args.port, args.runtimeTarget.environmentId)
   }
   const url = await resolveWorkspacePortBrowserUrl({
     port: args.port,
