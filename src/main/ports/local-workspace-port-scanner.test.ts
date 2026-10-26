@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import path from 'node:path'
+import type * as FsPromises from 'node:fs/promises'
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { scanWorkspacePorts } from './local-workspace-port-scanner'
@@ -18,6 +19,11 @@ vi.mock('./port-scan-command-client', () => ({
   runPortScanCommand: runPortScanCommandMock,
   isPortScanWorkerUnavailableError: () => false
 }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>()
+  return { ...actual, realpath: vi.fn(actual.realpath) }
+})
 
 const LSOF_LISTEN_OUTPUT = ['p123', 'cnode', 'n127.0.0.1:5173'].join('\n')
 
@@ -215,7 +221,62 @@ describe('scanWorkspacePorts attribution work', () => {
   afterEach(() => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
+    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
+  })
+
+  it('keeps lexical attribution and healthy aliases when another filesystem stalls', async () => {
+    vi.useFakeTimers()
+    let finishStalled: (value: string) => void = () => {}
+    const stalled = new Promise<string>((resolve) => {
+      finishStalled = resolve
+    })
+    const realpathSpy = vi.mocked(realpath).mockImplementation(async (target) => {
+      if (target === '/stalled') {
+        return stalled
+      }
+      return '/real/healthy'
+    })
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => ({
+      stdout:
+        command === 'lsof'
+          ? args.includes('-iTCP')
+            ? ['p123', 'cnode', 'n127.0.0.1:3000', 'p124', 'cnode', 'n127.0.0.1:3001'].join('\n')
+            : ['p123', 'n/stalled/app', 'p124', 'n/real/healthy/app'].join('\n')
+          : '',
+      spawnMs: 5
+    }))
+    const probes = [
+      { id: 'stalled', repoId: 'repo', displayName: 'Stalled', path: '/stalled' },
+      { id: 'healthy', repoId: 'repo', displayName: 'Healthy', path: '/linked/healthy' }
+    ]
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const watcher = urlWatcherStub()
+        const scanning = scanWorkspacePorts(probes, watcher)
+        await vi.advanceTimersByTimeAsync(250)
+        const scan = await scanning
+        expect(scan.ports).toEqual([
+          expect.objectContaining({
+            port: 3000,
+            owner: expect.objectContaining({ worktreeId: 'stalled' })
+          }),
+          expect.objectContaining({
+            port: 3001,
+            owner: expect.objectContaining({ worktreeId: 'healthy' })
+          })
+        ])
+        expect(watcher.reconcileScan).toHaveBeenCalledWith(['stalled'], [{ port: 3000, pid: 123 }])
+        expect(watcher.reconcileScan).toHaveBeenCalledWith(['healthy'], [{ port: 3001, pid: 124 }])
+      }
+      expect(realpathSpy.mock.calls.filter(([target]) => target === '/stalled')).toHaveLength(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      finishStalled('/stalled')
+      await vi.advanceTimersByTimeAsync(0)
+      vi.useRealTimers()
+    }
   })
 
   it('attributes real and symlink paths to the registered workspace and reconciles its URLs', async () => {
@@ -330,6 +391,7 @@ describe('scanWorkspacePorts lsof flags', () => {
   afterEach(() => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
+    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 
@@ -369,6 +431,7 @@ describe('scanWorkspacePorts command timeout', () => {
     vi.useRealTimers()
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
+    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 
@@ -432,6 +495,7 @@ describe('scanWorkspacePorts with delayed process creation', () => {
   afterEach(() => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
+    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 

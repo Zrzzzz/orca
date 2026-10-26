@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { realpath } from 'node:fs/promises'
+import { withTimeout } from '../../shared/promise-timeout-fallback'
 import type {
   WorkspacePort,
   WorkspacePortOwner,
@@ -11,6 +12,21 @@ import type {
   NormalizedWorkspacePortProbe,
   RawListeningPort
 } from './local-workspace-port-scan-state'
+
+const REALPATH_TIMEOUT_MS = 250
+const pendingRealpaths = new Map<string, Promise<string | undefined>>()
+
+function resolveWorkspaceRealpath(workspacePath: string): Promise<string | undefined> {
+  let pending = pendingRealpaths.get(workspacePath)
+  if (!pending) {
+    pending = realpath(workspacePath)
+      .catch(() => undefined)
+      .finally(() => pendingRealpaths.delete(workspacePath))
+    pendingRealpaths.set(workspacePath, pending)
+  }
+  // A timed-out filesystem call cannot be cancelled; reuse it across subsequent scans.
+  return withTimeout(pending, REALPATH_TIMEOUT_MS, undefined)
+}
 
 const HTTP_PORTS: Record<number, true> = {
   80: true,
@@ -48,13 +64,12 @@ export async function resolveWorkspacePortProbes(
   const probes = normalizeWorkspacePortProbes(worktrees)
   const aliases = await Promise.all(
     probes.map(async (probe) => {
-      try {
-        const normalizedPath = normalizeComparablePath(await realpath(probe.worktree.path))
-        return normalizedPath === probe.normalizedPath ? [] : [{ ...probe, normalizedPath }]
-      } catch {
-        // Unavailable directories still retain their lexical path for attribution.
+      const resolved = await resolveWorkspaceRealpath(probe.worktree.path)
+      if (resolved === undefined) {
         return []
       }
+      const normalizedPath = normalizeComparablePath(resolved)
+      return normalizedPath === probe.normalizedPath ? [] : [{ ...probe, normalizedPath }]
     })
   )
   return [...probes, ...aliases.flat()]
