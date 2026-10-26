@@ -15,11 +15,11 @@ jobs:
     env:
       ORCA_BACKGROUND_LAUNCH: '1'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      SOURCE_COMMIT: f72369581f5dce1636cc8ae0084a2a9d683f51f6
+      SOURCE_COMMIT: 8af3f17979ffc838e544f19b141c38de73f4740a
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: f72369581f5dce1636cc8ae0084a2a9d683f51f6
+          ref: 8af3f17979ffc838e544f19b141c38de73f4740a
           fetch-depth: 1
       - uses: actions/setup-node@v6
         with:
@@ -57,7 +57,7 @@ jobs:
           shasum -a 256 dist/*.dmg dist/*.zip > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
-          name: orca-macos-arm64-f72369581f
+          name: orca-macos-arm64-8af3f17979
           path: |
             dist/*.dmg
             dist/*.zip
