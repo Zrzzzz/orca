@@ -13,19 +13,31 @@ import type {
   RawListeningPort
 } from './local-workspace-port-scan-state'
 
-const REALPATH_TIMEOUT_MS = 250
-const pendingRealpaths = new Map<string, Promise<string | undefined>>()
+const REALPATH_TIMEOUT_MS = 1_000
+const pendingRealpaths = new Map<string, { observation: Promise<string | null | undefined> }>()
 
-function resolveWorkspaceRealpath(workspacePath: string): Promise<string | undefined> {
-  let pending = pendingRealpaths.get(workspacePath)
-  if (!pending) {
-    pending = realpath(workspacePath)
-      .catch(() => undefined)
-      .finally(() => pendingRealpaths.delete(workspacePath))
-    pendingRealpaths.set(workspacePath, pending)
+function observeWorkspaceRealpath(workspacePath: string): Promise<string | null | undefined> {
+  const pending = pendingRealpaths.get(workspacePath)
+  if (pending) {
+    return pending.observation
   }
-  // A timed-out filesystem call cannot be cancelled; reuse it across subsequent scans.
-  return withTimeout(pending, REALPATH_TIMEOUT_MS, undefined)
+  const lookup = realpath(workspacePath)
+    .catch((error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+        ? null
+        : undefined
+    )
+    .finally(() => {
+      if (pendingRealpaths.get(workspacePath) === operation) {
+        pendingRealpaths.delete(workspacePath)
+      }
+    })
+  // Native I/O cannot be cancelled; share one bounded observation until the OS releases its record.
+  const operation = { observation: withTimeout(lookup, REALPATH_TIMEOUT_MS, undefined) }
+  pendingRealpaths.set(workspacePath, operation)
+  return operation.observation
 }
 
 const HTTP_PORTS: Record<number, true> = {
@@ -59,20 +71,43 @@ export function normalizeWorkspacePortProbes(
 }
 
 export async function resolveWorkspacePortProbes(
-  worktrees: readonly WorkspacePortProbe[]
-): Promise<NormalizedWorkspacePortProbe[]> {
+  worktrees: readonly WorkspacePortProbe[],
+  requireFresh = false
+): Promise<{ probes: NormalizedWorkspacePortProbe[]; complete: boolean }> {
   const probes = normalizeWorkspacePortProbes(worktrees)
-  const aliases = await Promise.all(
-    probes.map(async (probe) => {
-      const resolved = await resolveWorkspaceRealpath(probe.worktree.path)
-      if (resolved === undefined) {
-        return []
-      }
-      const normalizedPath = normalizeComparablePath(resolved)
-      return normalizedPath === probe.normalizedPath ? [] : [{ ...probe, normalizedPath }]
-    })
+  const paths = [...new Set(worktrees.map((worktree) => worktree.path))]
+  const older = new Map(
+    paths.map((workspacePath) => [workspacePath, pendingRealpaths.get(workspacePath)])
   )
-  return [...probes, ...aliases.flat()]
+  if (requireFresh) {
+    // An older observation may release native work, but its alias cannot authorize this request.
+    await Promise.all([...older.values()].map((operation) => operation?.observation))
+  }
+  const resolvedPaths = new Map(
+    await Promise.all(
+      paths.map(async (workspacePath) => {
+        const old = older.get(workspacePath)
+        const resolved =
+          requireFresh && old && pendingRealpaths.get(workspacePath) === old
+            ? undefined
+            : await observeWorkspaceRealpath(workspacePath)
+        return [
+          workspacePath,
+          typeof resolved === 'string' ? normalizeComparablePath(resolved) : resolved
+        ] as const
+      })
+    )
+  )
+  const aliases = probes.flatMap((probe) => {
+    const normalizedPath = resolvedPaths.get(probe.worktree.path)
+    return normalizedPath && normalizedPath !== probe.normalizedPath
+      ? [{ ...probe, normalizedPath }]
+      : []
+  })
+  return {
+    probes: [...probes, ...aliases],
+    complete: [...resolvedPaths.values()].every((resolved) => resolved !== undefined)
+  }
 }
 
 function attributePortToNormalizedWorkspaces(

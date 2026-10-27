@@ -35,9 +35,12 @@ export async function scanWorkspacePorts(
   try {
     const { ports: rawPorts, metadataAvailable } = await scanPlatformListeningPorts(options)
     recordWorkspacePortScanSuccess()
-    const normalizedWorktrees = await resolveWorkspacePortProbes(worktrees)
+    const { probes: normalizedWorktrees, complete } = await resolveWorkspacePortProbes(
+      worktrees,
+      options.requireMetadata
+    )
     // Missing metadata cannot prove listener loss; eviction would discard URLs only PTY output can restore (#11161).
-    if (metadataAvailable) {
+    if (metadataAvailable && complete) {
       reconcileAdvertisedUrls(rawPorts, normalizedWorktrees, urlWatcher)
     }
     const ports = rawPorts

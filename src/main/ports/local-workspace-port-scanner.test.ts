@@ -3,6 +3,10 @@ import path from 'node:path'
 import type * as FsPromises from 'node:fs/promises'
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import * as platformScanner from './local-workspace-platform-port-scanner'
+import { AdvertisedUrlWatcher } from './advertised-url-watcher'
+import { killWorkspacePort } from './workspace-port-ownership'
+import { browserUrlForPort } from '../../renderer/src/lib/workspace-port-urls'
 import { scanWorkspacePorts } from './local-workspace-port-scanner'
 import { attributePortToWorkspace, isContainerProcess } from './local-workspace-port-attribution'
 import {
@@ -225,119 +229,61 @@ describe('scanWorkspacePorts attribution work', () => {
     runPortScanCommandMock.mockReset()
   })
 
-  it('keeps lexical attribution and healthy aliases when another filesystem stalls', async () => {
-    vi.useFakeTimers()
-    let finishStalled: (value: string) => void = () => {}
-    const stalled = new Promise<string>((resolve) => {
-      finishStalled = resolve
-    })
-    const realpathSpy = vi.mocked(realpath).mockImplementation(async (target) => {
-      if (target === '/stalled') {
-        return stalled
-      }
-      return '/real/healthy'
-    })
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => ({
-      stdout:
-        command === 'lsof'
-          ? args.includes('-iTCP')
-            ? ['p123', 'cnode', 'n127.0.0.1:3000', 'p124', 'cnode', 'n127.0.0.1:3001'].join('\n')
-            : ['p123', 'n/stalled/app', 'p124', 'n/real/healthy/app'].join('\n')
-          : '',
-      spawnMs: 5
-    }))
-    const probes = [
-      { id: 'stalled', repoId: 'repo', displayName: 'Stalled', path: '/stalled' },
-      { id: 'healthy', repoId: 'repo', displayName: 'Healthy', path: '/linked/healthy' }
-    ]
-    try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const watcher = urlWatcherStub()
-        const scanning = scanWorkspacePorts(probes, watcher)
-        await vi.advanceTimersByTimeAsync(250)
-        const scan = await scanning
-        expect(scan.ports).toEqual([
-          expect.objectContaining({
-            port: 3000,
-            owner: expect.objectContaining({ worktreeId: 'stalled' })
-          }),
-          expect.objectContaining({
-            port: 3001,
-            owner: expect.objectContaining({ worktreeId: 'healthy' })
-          })
-        ])
-        expect(watcher.reconcileScan).toHaveBeenCalledWith(['stalled'], [{ port: 3000, pid: 123 }])
-        expect(watcher.reconcileScan).toHaveBeenCalledWith(['healthy'], [{ port: 3001, pid: 124 }])
-      }
-      expect(realpathSpy.mock.calls.filter(([target]) => target === '/stalled')).toHaveLength(1)
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      finishStalled('/stalled')
-      await vi.advanceTimersByTimeAsync(0)
-      vi.useRealTimers()
-    }
-  })
-
-  it('attributes real and symlink paths to the registered workspace and reconciles its URLs', async () => {
+  it('preserves URLs through unknown aliases and uses fresh physical identity for Stop', async () => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'orca-port-alias-')))
+    const target = path.join(root, 'project'),
+      alias = path.join(root, 'linked')
+    const probe = { ...worktrees[0], path: alias }
+    const watcher = new AdvertisedUrlWatcher()
+    vi.spyOn(process, 'kill').mockReturnValue(true)
+    vi.spyOn(platformScanner, 'scanPlatformListeningPorts').mockResolvedValue({
+      ports: parseLsofListeningOutput(LSOF_LISTEN_OUTPUT).map((port) => ({ ...port, cwd: target })),
+      metadataAvailable: true
+    })
+    const scan = () => scanWorkspacePorts([probe], watcher)
+    const stop = () => killWorkspacePort([probe], { pid: 123, port: 5173 })
+    const pending = Promise.withResolvers<string>()
     try {
-      const target = path.join(root, 'project')
-      const alias = path.join(root, 'linked-project')
-      await mkdir(path.join(target, 'app'), { recursive: true })
+      await mkdir(target)
       await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir')
-      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-      const probe = { id: 'workspace', repoId: 'repo', displayName: 'Project', path: alias }
-      const missing = { ...probe, id: 'missing', path: path.join(root, 'missing') }
-      runPortScanCommandMock.mockImplementation(async (command: string, args: string[]) => ({
-        stdout:
-          command === 'lsof' && args.includes('-iTCP')
-            ? [
-                'p123',
-                'cpython',
-                'n127.0.0.1:8765',
-                'p124',
-                'cnode',
-                'n127.0.0.1:8766',
-                'p125',
-                'cnode',
-                'n127.0.0.1:8767'
-              ].join('\n')
-            : command === 'lsof'
-              ? [
-                  `p123`,
-                  `n${path.join(target, 'app')}`,
-                  'p124',
-                  `n${alias}`,
-                  'p125',
-                  `n${target}-other`
-                ].join('\n')
-              : '',
-        spawnMs: 5
-      }))
-      const watcher = urlWatcherStub()
-      const scan = await scanWorkspacePorts([probe, missing], watcher)
-      expect(scan.ports).toEqual([
-        expect.objectContaining({
-          port: 8765,
-          kind: 'workspace',
-          owner: expect.objectContaining({ worktreeId: probe.id, path: alias })
-        }),
-        expect.objectContaining({
-          port: 8766,
-          kind: 'workspace',
-          owner: expect.objectContaining({ worktreeId: probe.id, path: alias })
-        }),
-        expect.objectContaining({ port: 8767, kind: 'external' })
-      ])
-      expect(watcher.reconcileScan).toHaveBeenCalledWith(
-        [probe.id],
-        [
-          { port: 8765, pid: 123 },
-          { port: 8766, pid: 124 }
-        ]
+      watcher.bindPty('pty', probe.id)
+      watcher.ingest('pty', 'https://localhost:5173/\n')
+      expect((await scan()).ports).toMatchObject([{ owner: { worktreeId: probe.id, path: alias } }])
+      expect(await stop()).toEqual({ ok: true })
+      vi.useFakeTimers()
+      vi.mocked(realpath).mockReturnValueOnce(pending.promise)
+      const hanging = scan()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect((await hanging).ports).toMatchObject([{ kind: 'external' }])
+      const calls = vi.mocked(realpath).mock.calls.length
+      await Promise.all(Array.from({ length: 30 }, scan))
+      expect(await stop()).toMatchObject({ ok: false })
+      expect(vi.mocked(realpath)).toHaveBeenCalledTimes(calls)
+      pending.resolve(target)
+      await vi.advanceTimersByTimeAsync(0)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.mocked(realpath).mockImplementationOnce(
+          () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
+        )
+        const recovering = scan()
+        await vi.advanceTimersByTimeAsync(300)
+        expect((await recovering).ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
+      }
+      vi.mocked(realpath).mockImplementationOnce(
+        () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
+      const older = scan()
+      await vi.advanceTimersByTimeAsync(0)
+      await rm(alias)
+      await mkdir(`${target}-other`)
+      await symlink(`${target}-other`, alias, process.platform === 'win32' ? 'junction' : 'dir')
+      const stopping = stop()
+      await vi.advanceTimersByTimeAsync(300)
+      await older
+      expect(await stopping).toMatchObject({ ok: false })
     } finally {
+      pending.resolve(target)
+      vi.useRealTimers()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -391,7 +337,6 @@ describe('scanWorkspacePorts lsof flags', () => {
   afterEach(() => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
-    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 
@@ -431,7 +376,6 @@ describe('scanWorkspacePorts command timeout', () => {
     vi.useRealTimers()
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
-    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 
@@ -495,7 +439,6 @@ describe('scanWorkspacePorts with delayed process creation', () => {
   afterEach(() => {
     resetWorkspacePortScanTimeoutBackoffForTests()
     vi.restoreAllMocks()
-    vi.mocked(realpath).mockReset()
     runPortScanCommandMock.mockReset()
   })
 
