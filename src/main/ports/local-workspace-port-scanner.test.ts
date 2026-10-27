@@ -280,13 +280,11 @@ describe('scanWorkspacePorts attribution work', () => {
       pending.resolve(target)
       await vi.advanceTimersByTimeAsync(0)
       expect(realpath).toHaveBeenCalledTimes(2)
-      lookup.mockImplementation((value) =>
-        value === alias
-          ? // ast-grep-ignore: test-no-real-time-wait -- Fake time drives this mock's delay.
-            new Promise((resolve) => setTimeout(() => resolve(target), 300))
-          : Promise.resolve(String(value))
+      lookup.mockImplementation(
+        // ast-grep-ignore: test-no-real-time-wait -- Fake time drives this mock's delay.
+        () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
-      const recovered = await finish(scan(), 300)
+      const recovered = await finish(scanWorkspacePorts([probe], watcher), 300)
       expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
       expect(await finish(stop(), 300)).toEqual({ ok: true })
       lookup.mockImplementationOnce(
