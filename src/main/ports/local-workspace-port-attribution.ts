@@ -94,7 +94,7 @@ export async function resolveWorkspacePortProbes(
   const older = paths.map((workspacePath) => pendingRealpaths.get(workspacePath))
   if (requireFresh) {
     // An older observation may release native work, but its alias cannot authorize this request.
-    await Promise.all(older)
+    await Promise.all(older.filter((operation) => operation !== undefined))
   }
   const deadline = Date.now() + REALPATH_TIMEOUT_MS
   const resolvedPaths = new Map<string, string | null | undefined>()
