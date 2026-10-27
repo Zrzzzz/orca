@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import path from 'node:path'
+import { PrioritySemaphore } from '../../shared/priority-semaphore'
 import type * as FsPromises from 'node:fs/promises'
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -251,6 +252,7 @@ describe('scanWorkspacePorts attribution work', () => {
     const scan = () => scanWorkspacePorts([...probes, ...probes], watcher)
     const stop = () => killWorkspacePort([probe], { pid: 123, port: 5173 })
     const pending = Promise.withResolvers<string>()
+    const admission = vi.spyOn(PrioritySemaphore.prototype, 'acquire')
     try {
       await mkdir(target)
       await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir')
@@ -259,9 +261,10 @@ describe('scanWorkspacePorts attribution work', () => {
       expect((await scan()).ports).toMatchObject([{ owner: { worktreeId: probe.id, path: alias } }])
       expect(realpath).toHaveBeenCalledTimes(count + 1)
       vi.useFakeTimers()
+      admission.mockClear()
       lookup.mockClear().mockReturnValue(pending.promise)
       expect((await finish(scan())).ports).toMatchObject([{ kind: 'external' }])
-      const previousFirst = lookup.mock.calls[0]?.[0]
+      expect(admission).toHaveBeenCalledTimes(2)
       probes.slice(1).forEach((probe) => {
         probe.path += '/gone'
       })
@@ -270,22 +273,18 @@ describe('scanWorkspacePorts attribution work', () => {
       pending.resolve(target)
       await vi.advanceTimersByTimeAsync(0)
       expect(realpath).toHaveBeenCalledTimes(2)
-      for (let attempt = 0; attempt < 2; attempt++) {
-        lookup.mockClear()
-        lookup.mockImplementation((value) =>
-          value === alias
-            ? new Promise((resolve) => setTimeout(() => resolve(target), 300))
-            : Promise.resolve(String(value))
-        )
-        const recovered = await finish(scan(), 300)
-        expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
-        expect(await finish(stop(), 300)).toEqual({ ok: true })
-        expect(String(lookup.mock.calls[0]?.[0]).replace('/gone', '')).not.toBe(previousFirst)
-      }
+      lookup.mockImplementation((value) =>
+        value === alias
+          ? new Promise((resolve) => setTimeout(() => resolve(target), 300))
+          : Promise.resolve(String(value))
+      )
+      const recovered = await finish(scan(), 300)
+      expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
+      expect(await finish(stop(), 300)).toEqual({ ok: true })
       lookup.mockImplementationOnce(
         () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
-      const older = scan()
+      const older = scanWorkspacePorts([probe], watcher)
       await vi.advanceTimersByTimeAsync(0)
       lookup.mockReset()
       await rm(alias)
@@ -293,7 +292,7 @@ describe('scanWorkspacePorts attribution work', () => {
       await symlink(`${target}-other`, alias, process.platform === 'win32' ? 'junction' : 'dir')
       const stopping = stop()
       await vi.advanceTimersByTimeAsync(300)
-      await older
+      expect((await older).ports[0]?.kind).toBe('workspace')
       expect(await stopping).toMatchObject({ ok: false })
     } finally {
       pending.resolve(target)
