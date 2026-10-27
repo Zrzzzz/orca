@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { withTimeout } from '../../shared/promise-timeout-fallback'
+import { PrioritySemaphore } from '../../shared/priority-semaphore'
 import type {
   WorkspacePort,
   WorkspacePortOwner,
@@ -14,14 +15,25 @@ import type {
 } from './local-workspace-port-scan-state'
 
 const REALPATH_TIMEOUT_MS = 1_000
+const realpathSlots = new PrioritySemaphore(2)
+let aliasStart = 0
 const pendingRealpaths = new Map<string, { observation: Promise<string | null | undefined> }>()
 
-function observeWorkspaceRealpath(workspacePath: string): Promise<string | null | undefined> {
-  const pending = pendingRealpaths.get(workspacePath)
+function observeRealpath(root: string, deadline: number): Promise<string | null | undefined> {
+  const pending = pendingRealpaths.get(root)
   if (pending) {
     return pending.observation
   }
-  const lookup = realpath(workspacePath)
+  const controller = new AbortController()
+  const lookup = realpathSlots
+    .acquire(0, controller.signal)
+    .then((release) => {
+      if (controller.signal.aborted || Date.now() >= deadline) {
+        release()
+        return undefined
+      }
+      return realpath(root).then(normalizeComparablePath).finally(release)
+    })
     .catch((error: unknown) =>
       error instanceof Error &&
       'code' in error &&
@@ -30,13 +42,17 @@ function observeWorkspaceRealpath(workspacePath: string): Promise<string | null 
         : undefined
     )
     .finally(() => {
-      if (pendingRealpaths.get(workspacePath) === operation) {
-        pendingRealpaths.delete(workspacePath)
+      if (pendingRealpaths.get(root) === operation) {
+        pendingRealpaths.delete(root)
       }
     })
   // Native I/O cannot be cancelled; share one bounded observation until the OS releases its record.
-  const operation = { observation: withTimeout(lookup, REALPATH_TIMEOUT_MS, undefined) }
-  pendingRealpaths.set(workspacePath, operation)
+  const operation = {
+    observation: withTimeout(lookup, Math.max(0, deadline - Date.now()), undefined).finally(() =>
+      controller.abort()
+    )
+  }
+  pendingRealpaths.set(root, operation)
   return operation.observation
 }
 
@@ -76,25 +92,20 @@ export async function resolveWorkspacePortProbes(
 ): Promise<{ probes: NormalizedWorkspacePortProbe[]; complete: boolean }> {
   const probes = normalizeWorkspacePortProbes(worktrees)
   const paths = [...new Set(worktrees.map((worktree) => worktree.path))]
-  const older = new Map(
-    paths.map((workspacePath) => [workspacePath, pendingRealpaths.get(workspacePath)])
-  )
+  paths.push(...paths.splice(0, aliasStart++ % (paths.length || 1)))
+  const older = paths.map((workspacePath) => pendingRealpaths.get(workspacePath))
   if (requireFresh) {
     // An older observation may release native work, but its alias cannot authorize this request.
-    await Promise.all([...older.values()].map((operation) => operation?.observation))
+    await Promise.all(older.map((operation) => operation?.observation))
   }
+  const deadline = Date.now() + REALPATH_TIMEOUT_MS
   const resolvedPaths = new Map(
     await Promise.all(
-      paths.map(async (workspacePath) => {
-        const old = older.get(workspacePath)
-        const resolved =
-          requireFresh && old && pendingRealpaths.get(workspacePath) === old
-            ? undefined
-            : await observeWorkspaceRealpath(workspacePath)
-        return [
-          workspacePath,
-          typeof resolved === 'string' ? normalizeComparablePath(resolved) : resolved
-        ] as const
+      paths.map(async (workspacePath, index) => {
+        const old = older[index]
+        const blocked = requireFresh && old && pendingRealpaths.get(workspacePath) === old
+        const resolved = blocked ? undefined : await observeRealpath(workspacePath, deadline)
+        return [workspacePath, resolved] as const
       })
     )
   )

@@ -229,18 +229,26 @@ describe('scanWorkspacePorts attribution work', () => {
     runPortScanCommandMock.mockReset()
   })
 
-  it('preserves URLs through unknown aliases and uses fresh physical identity for Stop', async () => {
+  it.each([10, 100])('bounds %i roots, preserving URLs and fresh Stop', async (count) => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'orca-port-alias-')))
     const target = path.join(root, 'project'),
       alias = path.join(root, 'linked')
     const probe = { ...worktrees[0], path: alias }
+    const probes = Array.from({ length: count }, (_, index) =>
+      index === 0 ? probe : { ...probe, path: `${root}/extra-${index}` }
+    )
     const watcher = new AdvertisedUrlWatcher()
+    const lookup = vi.mocked(realpath)
+    const finish = async <T>(result: Promise<T>, ms = 1000): Promise<T> => {
+      await vi.advanceTimersByTimeAsync(ms)
+      return result
+    }
     vi.spyOn(process, 'kill').mockReturnValue(true)
     vi.spyOn(platformScanner, 'scanPlatformListeningPorts').mockResolvedValue({
       ports: parseLsofListeningOutput(LSOF_LISTEN_OUTPUT).map((port) => ({ ...port, cwd: target })),
       metadataAvailable: true
     })
-    const scan = () => scanWorkspacePorts([probe], watcher)
+    const scan = () => scanWorkspacePorts([...probes, ...probes], watcher)
     const stop = () => killWorkspacePort([probe], { pid: 123, port: 5173 })
     const pending = Promise.withResolvers<string>()
     try {
@@ -249,31 +257,37 @@ describe('scanWorkspacePorts attribution work', () => {
       watcher.bindPty('pty', probe.id)
       watcher.ingest('pty', 'https://localhost:5173/\n')
       expect((await scan()).ports).toMatchObject([{ owner: { worktreeId: probe.id, path: alias } }])
-      expect(await stop()).toEqual({ ok: true })
+      expect(realpath).toHaveBeenCalledTimes(count + 1)
       vi.useFakeTimers()
-      vi.mocked(realpath).mockReturnValueOnce(pending.promise)
-      const hanging = scan()
-      await vi.advanceTimersByTimeAsync(1000)
-      expect((await hanging).ports).toMatchObject([{ kind: 'external' }])
-      const calls = vi.mocked(realpath).mock.calls.length
-      await Promise.all(Array.from({ length: 30 }, scan))
-      expect(await stop()).toMatchObject({ ok: false })
-      expect(vi.mocked(realpath)).toHaveBeenCalledTimes(calls)
+      lookup.mockClear().mockReturnValue(pending.promise)
+      expect((await finish(scan())).ports).toMatchObject([{ kind: 'external' }])
+      const previousFirst = lookup.mock.calls[0]?.[0]
+      probes.slice(1).forEach((probe) => {
+        probe.path += '/gone'
+      })
+      await finish(Promise.all(Array.from({ length: 30 }, scan)))
+      expect(await finish(stop())).toMatchObject({ ok: false })
       pending.resolve(target)
       await vi.advanceTimersByTimeAsync(0)
+      expect(realpath).toHaveBeenCalledTimes(2)
       for (let attempt = 0; attempt < 2; attempt++) {
-        vi.mocked(realpath).mockImplementationOnce(
-          () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
+        lookup.mockClear()
+        lookup.mockImplementation((value) =>
+          value === alias
+            ? new Promise((resolve) => setTimeout(() => resolve(target), 300))
+            : Promise.resolve(String(value))
         )
-        const recovering = scan()
-        await vi.advanceTimersByTimeAsync(300)
-        expect((await recovering).ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
+        const recovered = await finish(scan(), 300)
+        expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
+        expect(await finish(stop(), 300)).toEqual({ ok: true })
+        expect(String(lookup.mock.calls[0]?.[0]).replace('/gone', '')).not.toBe(previousFirst)
       }
-      vi.mocked(realpath).mockImplementationOnce(
+      lookup.mockImplementationOnce(
         () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
       const older = scan()
       await vi.advanceTimersByTimeAsync(0)
+      lookup.mockReset()
       await rm(alias)
       await mkdir(`${target}-other`)
       await symlink(`${target}-other`, alias, process.platform === 'win32' ? 'junction' : 'dir')
