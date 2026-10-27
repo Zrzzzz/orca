@@ -282,13 +282,15 @@ describe('scanWorkspacePorts attribution work', () => {
       expect(realpath).toHaveBeenCalledTimes(2)
       lookup.mockImplementation((value) =>
         value === alias
-          ? new Promise((resolve) => setTimeout(() => resolve(target), 300))
+          ? // ast-grep-ignore: test-no-real-time-wait -- Fake time drives this mock's delay.
+            new Promise((resolve) => setTimeout(() => resolve(target), 300))
           : Promise.resolve(String(value))
       )
       const recovered = await finish(scan(), 300)
       expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
       expect(await finish(stop(), 300)).toEqual({ ok: true })
       lookup.mockImplementationOnce(
+        // ast-grep-ignore: test-no-real-time-wait -- Fake time drives this mock's delay.
         () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
       const older = scanWorkspacePorts([probe], watcher)
