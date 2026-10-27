@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os'
 import * as platformScanner from './local-workspace-platform-port-scanner'
 import { AdvertisedUrlWatcher } from './advertised-url-watcher'
 import { killWorkspacePort } from './workspace-port-ownership'
-import { browserUrlForPort } from '../../renderer/src/lib/workspace-port-urls'
 import { scanWorkspacePorts } from './local-workspace-port-scanner'
 import { attributePortToWorkspace, isContainerProcess } from './local-workspace-port-attribution'
 import {
@@ -285,7 +284,9 @@ describe('scanWorkspacePorts attribution work', () => {
         () => new Promise((resolve) => setTimeout(() => resolve(target), 300))
       )
       const recovered = await finish(scanWorkspacePorts([probe], watcher), 300)
-      expect(recovered.ports.map(browserUrlForPort)).toEqual(['https://localhost:5173'])
+      expect(
+        recovered.ports.map((port) => (port.kind === 'workspace' ? port.advertisedUrl : undefined))
+      ).toEqual(['https://localhost:5173'])
       expect(await finish(stop(), 300)).toEqual({ ok: true })
       lookup.mockImplementationOnce(
         // ast-grep-ignore: test-no-real-time-wait -- Fake time drives this mock's delay.
