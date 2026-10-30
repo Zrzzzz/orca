@@ -39,12 +39,15 @@ export type FileExplorerRow = TreeNode | InlineStatusNode
 const DESKTOP_EXCLUDED_NAMES = new Set(['.git', 'node_modules'])
 const BINARY_EXTENSIONS = new Set([
   ...Object.keys(MEDIA_FILE_MIME_TYPES),
+  '.apng',
   '.avif',
   '.bmp',
   '.gif',
   '.heic',
   '.ico',
   '.jpeg',
+  '.jpe',
+  '.jfif',
   '.jpg',
   '.mov',
   '.mp3',

@@ -385,6 +385,7 @@
     }
   },
   "editor": {
+    "svg": { "viewSource": "View source" },
     "richMarkdown": {
       "tooLarge": "File is larger than the {{limit}} rich editing limit. Showing source mode instead.",
       "openAnyway": "Open anyway"

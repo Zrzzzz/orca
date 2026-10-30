@@ -297,3 +297,35 @@ describe('virtual Markdown preview PDF export', () => {
     }
   })
 })
+
+describe('SVG viewing modes', () => {
+  it.each([false, true])(
+    'defaults SVG to preview with a source toggle (readOnly=%s)',
+    (readOnly) => {
+      const activeFile = markdownFile({
+        filePath: '/repo/figure.SVG',
+        relativePath: 'figure.SVG',
+        readOnly
+      })
+      const model = renderModel({
+        activeFile,
+        fileContents: { [activeFile.id]: textContent({ content: '<svg />' }) }
+      })
+      expect(model.mdViewMode).toBe('preview')
+      expect(model.hasEditorToggle).toBe(true)
+      const source = getEditorPanelRenderModel({
+        activeFile,
+        fileContents: {},
+        editorDrafts: {},
+        gitStatusEntries: undefined,
+        gitBranchEntries: undefined,
+        markdownViewMode: { [activeFile.id]: 'source' },
+        markdownRichModeSizeOverridden: false,
+        isChangesMode: false,
+        canOpenWorkspaceFileBrowser: false
+      })
+      expect(source.mdViewMode).toBe('source')
+      expect(source.resolvedLanguage).toBe('xml')
+    }
+  )
+})

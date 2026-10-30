@@ -20038,6 +20038,7 @@
     }
   },
   "editor": {
+    "svg": { "viewSource": "查看源码" },
     "richMarkdown": {
       "tooLarge": "文件大于 {{limit}} 丰富编辑限制。显示源模式。",
       "openAnyway": "无论如何打开"

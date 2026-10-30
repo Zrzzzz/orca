@@ -7,7 +7,6 @@ export type FilePreview = { kind: FilePreviewKind; mimeType: string }
 /** Images and PDFs, which local reads, `files.readPreview` and git blobs send whole. */
 export const IMAGE_AND_PDF_PREVIEW_MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   ...IMAGE_FILE_MIME_TYPES,
-  '.avif': 'image/avif',
   '.pdf': 'application/pdf'
 })
 

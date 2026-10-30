@@ -1,3 +1,5 @@
+import { filePreviewExtension } from '../../../../shared/file-preview-kind'
+import { SvgFileSurface } from './SvgFileSurface'
 import { translate } from '@/i18n/i18n'
 import { getConnectionIdForFile } from '@/lib/connection-context'
 import type { MarkdownViewMode, OpenFile, PendingEditorReveal } from '@/store/slices/editor'
@@ -308,6 +310,17 @@ export function EditorEditFileSurface({
       handleContentChange={handleContentChange}
       handleDirtyStateHint={handleDirtyStateHint}
       monacoEditor={monacoEditor}
+    />
+  ) : filePreviewExtension(activeFile.filePath) === '.svg' ? (
+    <SvgFileSurface
+      key={activeFile.id}
+      fileId={activeFile.id}
+      filePath={activeFile.filePath}
+      content={currentContent}
+      mode={mdViewMode}
+      source={monacoEditor}
+      preferenceKey={pdfPreferenceKey}
+      scrollCacheKey={pdfViewStateKey}
     />
   ) : isMermaid && mdViewMode === 'rich' ? (
     <MermaidViewer

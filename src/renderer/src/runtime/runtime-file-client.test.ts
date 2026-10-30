@@ -473,3 +473,54 @@ describe('runtime file client', () => {
     })
   })
 })
+
+describe('SVG editor reads', () => {
+  const content = '<svg xmlns="http://www.w3.org/2000/svg"><text>图片 🐋</text></svg>'
+
+  it.each([undefined, 'ssh-1'])(
+    'keeps editable UTF-8 source on %s without a range-only preview',
+    async (connectionId) => {
+      fsReadFile.mockResolvedValue({
+        content: Buffer.from(content).toString('base64'),
+        isBinary: true,
+        isImage: true,
+        mimeType: 'image/svg+xml'
+      })
+      const result = await readRuntimeFileContent({
+        target: { kind: 'local' },
+        filePath: '/repo/DRAWING.SVG',
+        connectionId,
+        pageOversizedBinary: true
+      })
+      expect(result).toMatchObject({ content, isBinary: false, isImage: false })
+      expect(fsReadFile).toHaveBeenCalledWith(expect.not.objectContaining({ rangePreview: true }))
+    }
+  )
+
+  it('keeps paired-server source intact without requesting a media grant', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-1',
+      ok: true,
+      result: { content, truncated: false },
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+    const result = await readRuntimeFileContent({
+      target: { kind: 'environment', environmentId: 'env-1' },
+      worktreeId: 'wt-1',
+      filePath: '/repo/drawing.svg',
+      relativePath: 'drawing.svg',
+      pageOversizedBinary: true
+    })
+    expect(result).toEqual({ content, isBinary: false })
+    expect(fsGrantRuntimeFilePreview).not.toHaveBeenCalled()
+    expect(fsReadFile).not.toHaveBeenCalled()
+  })
+
+  it('does not decode a raster target behind an SVG filename as source', async () => {
+    const raster = { content: 'iVBORw==', isBinary: true, isImage: true, mimeType: 'image/png' }
+    fsReadFile.mockResolvedValue(raster)
+    expect(
+      await readRuntimeFileContent({ target: { kind: 'local' }, filePath: '/repo/link.svg' })
+    ).toEqual(raster)
+  })
+})

@@ -1,3 +1,4 @@
+import { filePreviewExtension } from '../../../../shared/file-preview-kind'
 import { detectLanguage } from '@/lib/language-detect'
 import { canPreviewLanguage } from '@/lib/file-preview'
 import type { useAppStore } from '@/store'
@@ -78,7 +79,8 @@ export function getEditorPanelRenderModel({
         )
   // Read-only artifact tabs require raw source viewers; retain real-language tokenization while suppressing rich/preview modes and their editing affordances.
   const rawReadOnly = activeFile.mode === 'edit' && activeFile.readOnly === true
-  const viewerLanguage = rawReadOnly ? 'plaintext' : resolvedLanguage
+  const isSvg = filePreviewExtension(activeFile.filePath) === '.svg'
+  const viewerLanguage = isSvg ? 'svg' : rawReadOnly ? 'plaintext' : resolvedLanguage
   const worktreeEntries = gitStatusEntries ?? []
   const branchEntries = gitBranchEntries ?? []
   const matchingWorktreeEntry =

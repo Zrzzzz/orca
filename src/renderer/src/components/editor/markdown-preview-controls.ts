@@ -47,6 +47,10 @@ export function getMarkdownViewModes(target: MarkdownPreviewTarget): readonly Ma
     }
   }
 
+  if (target.language === 'svg' && target.mode === 'edit') {
+    return ['source', 'preview']
+  }
+
   if (target.language === 'mermaid' && target.mode === 'edit') {
     return MERMAID_VIEW_MODES
   }
@@ -65,6 +69,9 @@ export function getMarkdownViewModes(target: MarkdownPreviewTarget): readonly Ma
 export function getDefaultMarkdownViewMode(target: MarkdownPreviewTarget): MarkdownViewMode {
   if (target.language === 'markdown' && target.mode === 'diff') {
     return 'source'
+  }
+  if (target.language === 'svg' && target.mode === 'edit') {
+    return 'preview'
   }
   const modes = getMarkdownViewModes(target)
   return modes.includes('rich') ? 'rich' : 'source'

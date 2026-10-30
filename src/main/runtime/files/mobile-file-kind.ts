@@ -1,12 +1,15 @@
 import { basenameFromRelativePath } from './file-paths'
 
 const MOBILE_BINARY_EXTENSIONS = new Set([
+  '.apng',
   '.avif',
   '.bmp',
   '.gif',
   '.heic',
   '.ico',
   '.jpeg',
+  '.jpe',
+  '.jfif',
   '.jpg',
   '.mov',
   '.mp3',
@@ -18,9 +21,13 @@ const MOBILE_BINARY_EXTENSIONS = new Set([
 ])
 
 const MOBILE_PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
+  '.apng',
+  '.avif',
   '.png',
   '.jpg',
   '.jpeg',
+  '.jpe',
+  '.jfif',
   '.gif',
   '.webp',
   '.bmp',

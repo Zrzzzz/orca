@@ -1,3 +1,4 @@
+import { filePreviewExtension } from '../../../shared/file-preview-kind'
 import type { RuntimeFilePreviewResult, RuntimeFileReadResult } from '../../../shared/runtime-types'
 import { callRuntimeRpc } from './runtime-rpc-client'
 import { RuntimeRpcCallError } from './runtime-rpc-result'
@@ -40,7 +41,25 @@ import {
 
 export { localAccess } from './runtime-file-routing'
 
-export async function readRuntimeFileContent({
+export async function readRuntimeFileContent(
+  args: RuntimeFileReadArgs
+): Promise<RuntimeReadableFileContent> {
+  const isSvg = filePreviewExtension(args.filePath) === '.svg'
+  const result = await readOwnedFileContent(isSvg ? { ...args, pageOversizedBinary: false } : args)
+  if (!isSvg || !result.isBinary || result.mimeType !== 'image/svg+xml') {
+    return result
+  }
+  // Keep SVG source available for edits; older hosts may already return it as text.
+  const bytes = Uint8Array.from(atob(result.content), (character) => character.charCodeAt(0))
+  return {
+    ...result,
+    content: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
+    isBinary: false,
+    isImage: false
+  }
+}
+
+async function readOwnedFileContent({
   target,
   filePath,
   relativePath,
