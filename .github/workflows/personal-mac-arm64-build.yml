@@ -49,28 +49,19 @@ jobs:
       - name: Validate workspace view synchronization
         run: |
           pnpm run tc:web
-          pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/ui/workspace-view-sync.test.ts src/renderer/src/app-shell/workspace-view-cross-client-sync.test.tsx src/renderer/src/store/slices/settings/worktree-visibility-settings-write.test.ts src/renderer/src/hooks/ipc-events/runtime-client-ipc-bridge-ownership.test.ts
+          pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/ui/workspace-view-sync.test.ts src/renderer/src/app-shell/workspace-view-cross-client-sync.test.tsx src/renderer/src/store/slices/settings/worktree-visibility-settings-write.test.ts src/renderer/src/hooks/ipc-events/runtime-client-ipc-bridge-ownership.test.ts src/main/browser/extensions/browser-extension-commands.test.ts
       - name: Compile application and native helpers
         shell: bash
         run: |
-          run_build() {
-            local log="$RUNNER_TEMP/orca-build-${3//:/-}.log"
-            if ! "$@" 2>&1 | tee "$log"; then
-              while IFS= read -r line; do
-                printf '::error::%s\n' "$line"
-              done < <(tail -n 12 "$log")
-              exit 1
-            fi
-          }
-          run_build pnpm run build:desktop:assets
-          run_build pnpm run build:native
-          run_build pnpm run ensure:electron-runtime
+          bash .github/scripts/run-personal-mac-build.sh assets pnpm run build:desktop:assets
+          bash .github/scripts/run-personal-mac-build.sh native pnpm run build:native
+          bash .github/scripts/run-personal-mac-build.sh runtime pnpm run ensure:electron-runtime
       - name: Record development build identity
         id: identity
         run: |
           node --input-type=module -e "import { getLocalBuildIdentity } from './config/scripts/desktop-distribution/macos/build-mac-local.mjs'; import { appendFileSync } from 'node:fs'; const identity = getLocalBuildIdentity(); appendFileSync(process.env.GITHUB_ENV, 'ORCA_BUILD_COMMIT=' + identity.commit + '\nORCA_LOCAL_BUILD_VERSION=' + identity.version + '\n'); appendFileSync(process.env.GITHUB_OUTPUT, 'commit=' + identity.commit + '\n')"
       - name: Build arm64 DMG and ZIP
-        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --mac dmg zip --arm64 --publish never
+        run: bash .github/scripts/run-personal-mac-build.sh package pnpm exec electron-builder --config config/electron-builder.config.cjs --mac dmg zip --arm64 --publish never
       - name: Verify packaged architecture and record identity
         run: |
           file dist/mac-arm64/Orca.app/Contents/MacOS/Orca
