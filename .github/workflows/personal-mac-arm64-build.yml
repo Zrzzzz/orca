@@ -51,12 +51,14 @@ jobs:
           pnpm run tc:web
           pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/ui/workspace-view-sync.test.ts src/renderer/src/app-shell/workspace-view-cross-client-sync.test.tsx src/renderer/src/store/slices/settings/worktree-visibility-settings-write.test.ts src/renderer/src/hooks/ipc-events/runtime-client-ipc-bridge-ownership.test.ts
       - name: Compile application and native helpers
+        shell: bash
         run: |
           run_build() {
-            if ! "$@" 2>&1 | tee "$RUNNER_TEMP/orca-build.log"; then
+            local log="$RUNNER_TEMP/orca-build-${3//:/-}.log"
+            if ! "$@" 2>&1 | tee "$log"; then
               while IFS= read -r line; do
                 printf '::error::%s\n' "$line"
-              done < <(tail -n 12 "$RUNNER_TEMP/orca-build.log")
+              done < <(tail -n 12 "$log")
               exit 1
             fi
           }
@@ -92,6 +94,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-diagnostics-${{ github.sha }}
-          path: ${{ runner.temp }}/orca-build.log
+          path: ${{ runner.temp }}/orca-build-*.log
           if-no-files-found: ignore
           retention-days: 7
