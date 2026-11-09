@@ -52,9 +52,17 @@ jobs:
           pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/ui/workspace-view-sync.test.ts src/renderer/src/app-shell/workspace-view-cross-client-sync.test.tsx src/renderer/src/store/slices/settings/worktree-visibility-settings-write.test.ts src/renderer/src/hooks/ipc-events/runtime-client-ipc-bridge-ownership.test.ts
       - name: Compile application and native helpers
         run: |
-          pnpm run build:desktop:assets
-          pnpm run build:native
-          pnpm run ensure:electron-runtime
+          run_build() {
+            if ! "$@" 2>&1 | tee "$RUNNER_TEMP/orca-build.log"; then
+              while IFS= read -r line; do
+                printf '::error::%s\n' "$line"
+              done < <(tail -n 12 "$RUNNER_TEMP/orca-build.log")
+              exit 1
+            fi
+          }
+          run_build pnpm run build:desktop:assets
+          run_build pnpm run build:native
+          run_build pnpm run ensure:electron-runtime
       - name: Record development build identity
         id: identity
         run: |
@@ -79,3 +87,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/orca-build.log
+          if-no-files-found: ignore
+          retention-days: 7
