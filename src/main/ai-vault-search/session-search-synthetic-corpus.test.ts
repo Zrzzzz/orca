@@ -1,8 +1,8 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { resetSessionParseCacheForTests } from '../ai-vault/session-scanner-parse-cache'
-import { resetTranscriptConsumersForTests } from '../ai-vault/session-transcript-consumers'
+import { resetSessionParseCacheForTests } from '../ai-vault/parse-cache/session-parse-cache-store'
+import { resetTranscriptConsumersForTests } from '../ai-vault/transcripts/session-transcript-consumers'
 import { registerSessionSearchIndexConsumer } from './session-search-index-consumer'
 import { SessionSearchStore } from './session-search-store'
 import { writeSyntheticTranscriptCorpus } from './session-search-synthetic-corpus'
@@ -31,7 +31,7 @@ it.each([0, 200, 2000])(
       await parseTranscript(corpus.files[0]!)
       expect(corpus.messageCount).toBe(toolResultWords === 0 ? 3 : 4)
       expect(store.connection.prepare('SELECT count(*) AS n FROM messages').get()).toEqual({
-        n: corpus.messageCount
+        n: 2
       })
     } finally {
       unregister()

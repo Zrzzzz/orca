@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { recomputeOn } from '@/lib/recompute-on'
 import type { RuntimeBrowserDriverState } from '../../../../shared/runtime-types'
 
 export type BrowserDriverState = RuntimeBrowserDriverState
@@ -64,8 +65,10 @@ export function getDriverForBrowserPage(browserPageId: string): BrowserDriverSta
 export function useBrowserDriverForPage(
   browserPageId: string | null | undefined
 ): BrowserDriverState {
-  useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  return browserPageId ? getDriverForBrowserPage(browserPageId) : IDLE_BROWSER_DRIVER
+  const storeVersion = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  return recomputeOn([storeVersion], () =>
+    browserPageId ? getDriverForBrowserPage(browserPageId) : IDLE_BROWSER_DRIVER
+  )
 }
 
 export function isBrowserPageMobileDriven(browserPageId: string): boolean {
@@ -93,15 +96,15 @@ export function getBrowserMobileDrivenPageIds(
 export function useBrowserMobileDriverForAny(
   browserPageIds: readonly (string | null | undefined)[]
 ): boolean {
-  useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  return hasMobileDriverForAnyBrowserPage(browserPageIds)
+  const storeVersion = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  return recomputeOn([storeVersion], () => hasMobileDriverForAnyBrowserPage(browserPageIds))
 }
 
 export function useBrowserMobileDrivenPageIds(
   browserPageIds: readonly (string | null | undefined)[]
 ): Set<string> {
-  useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  return getBrowserMobileDrivenPageIds(browserPageIds)
+  const storeVersion = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  return recomputeOn([storeVersion], () => getBrowserMobileDrivenPageIds(browserPageIds))
 }
 
 export function hydrateBrowserDrivers(
@@ -117,8 +120,7 @@ export function hydrateBrowserDrivers(
     }
   }
 
-  // Why: browser panes can mount before IPC hydration returns after reload.
-  // Notify all known pages so a stale desktop input surface cannot stay active.
+  // Notify every known page after late hydration so mounted panes cannot retain stale desktop input ownership.
   for (const browserPageId of affectedPageIds) {
     notifyChange({ browserPageId, driver: getDriverForBrowserPage(browserPageId) })
   }

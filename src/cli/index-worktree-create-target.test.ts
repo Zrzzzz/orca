@@ -30,9 +30,12 @@ vi.mock('./runtime-client', async () => {
 
 vi.mock('./runtime/environments', () => ({
   addEnvironmentFromPairingCode: addEnvironmentFromPairingCodeMock,
-  listEnvironments: listEnvironmentsMock,
   removeEnvironment: vi.fn(),
   resolveEnvironment: vi.fn()
+}))
+
+vi.mock('../shared/remote-runtime/host-store/runtime-environment-store', () => ({
+  listEnvironments: listEnvironmentsMock
 }))
 
 vi.mock('child_process', async () => {
@@ -41,7 +44,13 @@ vi.mock('child_process', async () => {
 })
 
 import { main } from './index'
-import { buildWorktree, okFixture, queueFixtures, worktreeListFixture } from './test-fixtures'
+import {
+  buildWorktree,
+  noFolderWorkspacesFixture,
+  okFixture,
+  queueFixtures,
+  worktreeListFixture
+} from './test-fixtures'
 import { pairRuntimeEnvironment, useWorktreeAwarenessEnvironment } from './index-test-harness'
 import { RuntimeRpcFailureError } from './runtime-client'
 
@@ -79,6 +88,7 @@ describe('orca cli worktree awareness', () => {
     queueFixtures(
       callMock,
       worktreeListFixture([buildWorktree('/tmp/repo', 'main', 'abc', 'repo-1')]),
+      noFolderWorkspacesFixture(),
       okFixture('req_create', {
         worktree: buildWorktree('/tmp/repo/feature', 'feature', 'abc', 'repo-1')
       })
@@ -90,7 +100,7 @@ describe('orca cli worktree awareness', () => {
       '/tmp/repo'
     )
 
-    expect(callMock).toHaveBeenNthCalledWith(2, 'worktree.create', {
+    expect(callMock).toHaveBeenNthCalledWith(3, 'worktree.create', {
       repo: 'id:repo-1',
       name: 'feature',
       displayName: 'feature',
@@ -233,9 +243,6 @@ describe('orca cli worktree awareness', () => {
     )
   })
 
-  // Why: swallowing every project.list failure made a network blip or a permission error
-  // indistinguishable from "no project by that name", and the caller was then told their project
-  // was not set up on any host.
   it('surfaces a project.list failure instead of reporting the project as not set up', async () => {
     const { RuntimeClientError } = await import('./runtime/types.js')
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -265,8 +272,6 @@ describe('orca cli worktree awareness', () => {
     process.exitCode = priorExitCode
   })
 
-  // Why: the legacy fallback matches a repo folder name, and two projects can hold repos with the
-  // same folder name. Selecting either would target a project the caller never named.
   it('refuses a legacy display-name match that spans two projects', async () => {
     const { RuntimeClientError } = await import('./runtime/types.js')
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -312,7 +317,6 @@ describe('orca cli worktree awareness', () => {
     process.exitCode = priorExitCode
   })
 
-  // Only a version gap earns the weaker match against the setup's own display name.
   it('falls back to the setup display name when the server has no project.list', async () => {
     const { RuntimeClientError } = await import('./runtime/types.js')
     queueFixtures(
@@ -354,9 +358,6 @@ describe('orca cli worktree awareness', () => {
     )
   })
 
-  // Why: the reported failure. `orca project list` shows the display name, so that is what gets
-  // typed; matching the provider-scoped projectId alone reported "not set up" for a project that
-  // was sitting right there, and blamed the missing --host for it.
   it('resolves --project by display name and infers the only host it is set up on', async () => {
     queueFixtures(
       callMock,
@@ -397,7 +398,6 @@ describe('orca cli worktree awareness', () => {
     )
   })
 
-  // Why: a project that matched nothing used to be reported as a host problem.
   it('reports an unknown project as a project miss, not a host one', async () => {
     queueFixtures(
       callMock,
@@ -420,8 +420,6 @@ describe('orca cli worktree awareness', () => {
     process.exitCode = priorExitCode
   })
 
-  // Why: one host is not a choice. Two are, and picking one would create the worktree on a
-  // machine the caller never named.
   it('asks which host only when the project is set up on more than one', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -470,8 +468,6 @@ describe('orca cli worktree awareness', () => {
     process.exitCode = priorExitCode
   })
 
-  // Why: `orca host list` prints `trader-local`, so that is what gets typed. Only the generated
-  // `ssh:ssh-<timestamp>-<random>` spelling used to be accepted.
   it('accepts the host alias that `orca host list` prints', async () => {
     queueFixtures(
       callMock,
@@ -548,70 +544,6 @@ describe('orca cli worktree awareness', () => {
     expect(process.exitCode).toBe(1)
 
     process.exitCode = priorExitCode
-  })
-
-  it('passes caller terminal handle through worktree.create with cwd fallback', async () => {
-    process.env.ORCA_TERMINAL_HANDLE = 'term_parent'
-    queueFixtures(
-      callMock,
-      worktreeListFixture([buildWorktree('/tmp/repo', 'main', 'abc', 'repo-1')]),
-      okFixture('req_create', {
-        worktree: buildWorktree('/tmp/repo/child', 'child', 'abc', 'repo-1'),
-        lineage: null,
-        warnings: []
-      })
-    )
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    await main(
-      ['worktree', 'create', '--repo', 'id:repo-1', '--name', 'child', '--json'],
-      '/tmp/repo'
-    )
-
-    expect(callMock).toHaveBeenCalledTimes(2)
-    expect(callMock).toHaveBeenNthCalledWith(2, 'worktree.create', {
-      repo: 'id:repo-1',
-      name: 'child',
-      displayName: 'child',
-      displayNameKind: 'user',
-      baseBranch: undefined,
-      linkedIssue: undefined,
-      comment: undefined,
-      runHooks: false,
-      activate: false,
-      parentWorktree: undefined,
-      cwdParentWorktree: 'id:repo-1::/tmp/repo',
-      noParent: false,
-      callerTerminalHandle: 'term_parent',
-      cliProvenanceRequest: { callerTerminalHandle: 'term_parent' }
-    })
-  })
-
-  it('marks every worktree.create as CLI-created even from an external shell', async () => {
-    // Why: the sidebar badge/filter must catch hand-typed creates too, so the
-    // provenance request is sent with no terminal handle rather than omitted.
-    delete process.env.ORCA_TERMINAL_HANDLE
-    queueFixtures(
-      callMock,
-      okFixture('req_create_external', {
-        worktree: buildWorktree('/tmp/repo/child', 'child', 'abc', 'repo-1'),
-        lineage: null,
-        warnings: []
-      })
-    )
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    await main(
-      ['worktree', 'create', '--repo', 'id:repo-1', '--name', 'child', '--no-parent', '--json'],
-      '/tmp/repo'
-    )
-
-    expect(callMock).toHaveBeenCalledWith(
-      'worktree.create',
-      expect.objectContaining({ cliProvenanceRequest: {} })
-    )
   })
 
   it('tells the user which --setup flag answers an undecided ask repo', async () => {

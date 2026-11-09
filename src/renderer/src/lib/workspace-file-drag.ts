@@ -3,7 +3,7 @@ import {
   NATIVE_FILE_DROP_MAX_PATH_BYTES,
   NATIVE_FILE_DROP_MAX_PATHS,
   validateNativeFileDropPaths
-} from '../../../shared/native-file-drop'
+} from '../../../shared/file-import/native-file-drop'
 import { measureClipboardTextByteLength } from '../../../shared/clipboard-text'
 import {
   isUnresolvedOwnerHostId,
@@ -206,8 +206,7 @@ function getUniqueWorkspaceFilePathEntries(
 function getTopLevelWorkspaceFilePaths(paths: readonly string[]): string[] {
   const uniquePaths = getUniqueWorkspaceFilePathEntries(paths)
 
-  // Why: moving a selected folder already moves its descendants; issuing
-  // extra moves for selected children races against paths that no longer exist.
+  // Moving a selected folder includes descendants; extra child moves race paths already removed.
   return uniquePaths
     .filter(
       (pathEntry) =>
@@ -228,6 +227,7 @@ export function readWorkspaceFileDragPaths(
   options: {
     maxPathBytes?: number
     maxPaths?: number
+    collapseDescendantsForMove?: boolean
   } = {}
 ): WorkspaceFileDragPathsReadResult {
   const maxPathBytes = options.maxPathBytes ?? NATIVE_FILE_DROP_MAX_PATH_BYTES
@@ -269,7 +269,10 @@ export function readWorkspaceFileDragPaths(
     }
   }
 
-  const paths = getTopLevelWorkspaceFilePaths(decodedPaths)
+  const paths =
+    options.collapseDescendantsForMove === false
+      ? getUniqueWorkspaceFilePathEntries(decodedPaths).map((entry) => entry.path)
+      : getTopLevelWorkspaceFilePaths(decodedPaths)
   return {
     byteLength: validation.byteLength,
     pathCount: paths.length,

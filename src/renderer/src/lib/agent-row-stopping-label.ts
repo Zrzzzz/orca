@@ -1,19 +1,18 @@
-import { agentStopDisplayStatus } from '../../../shared/agent-stop-display-status'
-import type { AgentStatusEntry } from '../../../shared/agent-status-types'
+import { agentStopDisplayStatus } from '../../../shared/agent-status/lifecycle/agent-stop-display-status'
+import type { AgentStatusEntry } from '../../../shared/agent-status/contracts/agent-status-types'
 import { translate } from '@/i18n/i18n'
-import type { AgentRowState } from '../../../shared/agent-row-decay-state'
+import type { Translate } from '@/i18n/use-translate'
+import type { AgentRowState } from '../../../shared/agent-status/presentation/agent-row-decay-state'
 
-/** "Stopping…" while a person's Stop ends a working row's turn, else null. Every agent row says it
- *  in place of the last tool line, which no longer says what comes next. */
+/** Replace the last tool line with Stopping… while a user-requested stop ends a working turn. */
 export function agentRowStoppingLabel(
   entry: Pick<AgentStatusEntry, 'mainAgent'>,
-  state: AgentRowState | null | undefined
+  state: AgentRowState | null | undefined,
+  t: Translate = translate
 ): string | null {
   const display = agentStopDisplayStatus({
     working: state === 'working',
     hostStopping: entry.mainAgent?.stopping === true
   })
-  return display === 'stopping'
-    ? translate('components.native-chat.status.stopping', 'Stopping…')
-    : null
+  return display === 'stopping' ? t('components.native-chat.status.stopping', 'Stopping…') : null
 }

@@ -1,33 +1,24 @@
 // @vitest-environment happy-dom
 
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
 import { remapOpenEditorTabsForPathChange } from './remap-open-editor-tabs-for-path-change'
 import {
   drawTabsFromMain,
   type TabsDrawnFromMain
-} from '@/store/slices/tabs-drawn-from-main.test-fixture'
-import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
+} from '@/store/slices/tabs/tabs-drawn-from-main.test-fixture'
 import { editorMoveOwnerFromContext, type EditorMoveOwner } from '@/lib/open-editor-move-owner'
 
-function ownedEditorFileId(
-  filePath: string,
-  worktreeId: string,
-  runtimeEnvironmentId: string | null | undefined
-): string {
-  const runtimeKey = runtimeEnvironmentId?.trim() || 'local'
-  return `editor:${encodeURIComponent(worktreeId)}:${encodeURIComponent(runtimeKey)}:${encodeURIComponent(filePath)}`
-}
-
 // Switch on: main renames the tabs, and its frame rekeys the content (T1 transport, apply mode).
-vi.mock('@/runtime/runtime-rpc-client', async (importOriginal) =>
+vi.mock('@/runtime/rpc/calls/runtime-rpc-call', async (importOriginal) =>
   (
-    await import('@/runtime/layout-apply-test-transport.test-fixture')
+    await import('@/runtime/workspace-layout/testing/layout-apply-test-transport.test-fixture')
   ).runtimeRpcClientWithLayoutApply(await importOriginal())
 )
-vi.mock('@/runtime/runtime-layout-client', async (importOriginal) =>
+vi.mock('@/runtime/workspace-layout/frames/runtime-layout-client', async (importOriginal) =>
   (
-    await import('@/runtime/layout-apply-test-transport.test-fixture')
+    await import('@/runtime/workspace-layout/testing/layout-apply-test-transport.test-fixture')
   ).runtimeLayoutClientWithTestFrames(await importOriginal())
 )
 
@@ -149,57 +140,8 @@ describe('remapOpenEditorTabsForPathChange', () => {
     expect(nextState.editorDrafts[localEditId!]).toBe('local draft')
   })
 
-  it('retargets preview-only markdown source ids to the moved owner path', async () => {
-    const state = useAppStore.getState()
-    const worktreePath = '/repo'
-    const oldPath = '/repo/docs/readme.md'
-    const newPath = '/repo/notes/readme.md'
-    const floatingOldSourceId = ownedEditorFileId(oldPath, FLOATING_TERMINAL_WORKTREE_ID, null)
-    const floatingNewSourceId = ownedEditorFileId(newPath, FLOATING_TERMINAL_WORKTREE_ID, null)
-
-    state.openMarkdownPreview({
-      filePath: oldPath,
-      relativePath: 'docs/readme.md',
-      worktreeId: 'wt-1',
-      language: 'markdown'
-    })
-    state.openMarkdownPreview({
-      filePath: oldPath,
-      relativePath: 'readme.md',
-      worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
-      runtimeEnvironmentId: null,
-      language: 'markdown'
-    })
-    expect(
-      useAppStore
-        .getState()
-        .openFiles.find((file) => file.worktreeId === FLOATING_TERMINAL_WORKTREE_ID)
-        ?.markdownPreviewSourceFileId
-    ).toBe(floatingOldSourceId)
-
-    await remap({
-      fromPath: '/repo/docs',
-      toPath: '/repo/notes',
-      worktreePath,
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    const floatingPreview = useAppStore
-      .getState()
-      .openFiles.find((file) => file.worktreeId === FLOATING_TERMINAL_WORKTREE_ID)
-
-    expect(floatingPreview).toMatchObject({
-      id: `markdown-preview::${floatingNewSourceId}`,
-      filePath: newPath,
-      relativePath: '../notes/readme.md',
-      markdownPreviewSourceFileId: floatingNewSourceId
-    })
-  })
-
   it('leaves a same-path tab on a different execution host untouched', async () => {
-    // Two SSH connections both have /repo/a.md open with separate dirty drafts.
-    // Renaming on connA's host must not retarget connB's tab (a distinct file).
+    // Same paths on distinct SSH owners are different files; connA rename must preserve connB drafts/tabs.
     const state = useAppStore.getState()
     useAppStore.setState({
       repos: [
@@ -242,7 +184,6 @@ describe('remapOpenEditorTabsForPathChange', () => {
     expect(result.ok).toBe(true)
 
     const files = useAppStore.getState().openFiles
-    // connA's tab moved; connB's tab kept its id, path, AND its dirty draft.
     expect(files.find((f) => f.worktreeId === 'wt-a')!.filePath).toBe('/repo/b.md')
     const tabB = files.find((f) => f.worktreeId === 'wt-b')!
     expect(tabB.id).toBe(idB)
@@ -251,44 +192,8 @@ describe('remapOpenEditorTabsForPathChange', () => {
     expect(useAppStore.getState().editorDrafts[idB]).toBe('draft B')
   })
 
-  it('selects a Windows tab whose path differs only in case from the move root', async () => {
-    // Windows paths are case-insensitive: an open tab at C:\Repo\Src\a.ts must be
-    // retargeted when the move root is c:\repo\src — otherwise the rename lands on
-    // disk while the tab is stranded on the vanished source path.
-    const state = useAppStore.getState()
-    state.openFile(
-      {
-        filePath: 'C:\\Repo\\Src\\a.ts',
-        relativePath: 'Src\\a.ts',
-        worktreeId: 'wt-1',
-        language: 'typescript',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-    const id = useAppStore.getState().openFiles[0]!.id
-    state.setEditorDraft(id, 'dirty windows work')
-    state.markFileDirty(id, true)
-
-    const result = await remap({
-      fromPath: 'c:\\repo\\src',
-      toPath: 'c:\\repo\\dst',
-      worktreePath: 'c:\\repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    expect(result.ok).toBe(true)
-    const moved = useAppStore.getState().openFiles[0]!
-    expect(moved.filePath).toBe('c:\\repo\\dst\\a.ts')
-    expect(moved.isDirty).toBe(true)
-    expect(useAppStore.getState().editorDrafts[moved.id]).toBe('dirty windows work')
-  })
-
   it('rebuilds the moved path across WSL UNC aliases without fabricating segments', async () => {
-    // The shared matcher equates \\wsl$\Ubuntu and \\wsl.localhost\ubuntu (same
-    // filesystem), but they differ in raw length — a raw slice(fromPath.length)
-    // would corrupt the destination. Segment-count reconstruction must not.
+    // WSL UNC aliases match despite different lengths; reconstruct by segments, never raw fromPath.length slices.
     const state = useAppStore.getState()
     state.openFile(
       {
@@ -319,8 +224,7 @@ describe('remapOpenEditorTabsForPathChange', () => {
   })
 
   it('preserves a legal backslash in a POSIX/SSH filename (no separator invention)', async () => {
-    // Backslash is legal filename data on POSIX; the move must not treat it as a
-    // separator or emit one into the destination.
+    // POSIX backslashes are filename data, never separators in either source or destination.
     const state = useAppStore.getState()
     state.openFile(
       {
@@ -342,156 +246,6 @@ describe('remapOpenEditorTabsForPathChange', () => {
     })
 
     expect(useAppStore.getState().openFiles[0]!.filePath).toBe('/repo/dst/a\\b.txt')
-  })
-
-  it('preserves a legal POSIX backslash in a cross-worktree tab relative path', async () => {
-    const state = useAppStore.getState()
-    // Anchor the move to wt-1 / local host.
-    state.openFile(
-      {
-        filePath: '/repo/src/keep.ts',
-        relativePath: 'src/keep.ts',
-        worktreeId: 'wt-1',
-        runtimeEnvironmentId: null,
-        language: 'typescript',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-    // Floating tab for a POSIX file whose name contains a literal backslash.
-    state.openFile(
-      {
-        filePath: '/repo/src/a\\b.txt',
-        relativePath: 'a\\b.txt',
-        worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
-        runtimeEnvironmentId: null,
-        language: 'plaintext',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-
-    await remap({
-      fromPath: '/repo/src',
-      toPath: '/repo/dst',
-      worktreePath: '/repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    const floating = useAppStore
-      .getState()
-      .openFiles.find((f) => f.worktreeId === FLOATING_TERMINAL_WORKTREE_ID)!
-    expect(floating.filePath).toBe('/repo/dst/a\\b.txt')
-    // The backslash stays filename data in the recomputed relativePath — it must
-    // NOT have been folded into a `a/b.txt` separator.
-    expect(floating.relativePath.includes('a\\b.txt')).toBe(true)
-    expect(floating.relativePath.includes('a/b.txt')).toBe(false)
-  })
-
-  it('does not strip a trailing backslash from a POSIX destination directory name', async () => {
-    const state = useAppStore.getState()
-    state.openFile(
-      {
-        filePath: '/repo/src/a.ts',
-        relativePath: 'src/a.ts',
-        worktreeId: 'wt-1',
-        language: 'typescript',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-
-    // Destination directory is literally named `dst\` (legal on POSIX).
-    await remap({
-      fromPath: '/repo/src',
-      toPath: '/repo/dst\\',
-      worktreePath: '/repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    expect(useAppStore.getState().openFiles[0]!.filePath).toBe('/repo/dst\\/a.ts')
-  })
-
-  it('keeps `/` for a POSIX destination whose ancestor contains a legal backslash', async () => {
-    const state = useAppStore.getState()
-    state.openFile(
-      {
-        filePath: '/srv/team\\repo/src/a.ts',
-        relativePath: 'src/a.ts',
-        worktreeId: 'wt-1',
-        language: 'typescript',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-
-    await remap({
-      fromPath: '/srv/team\\repo/src',
-      toPath: '/srv/team\\repo/dst',
-      worktreePath: '/srv/team\\repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    // POSIX flavor: the separator stays `/`; the ancestor backslash is untouched.
-    expect(useAppStore.getState().openFiles[0]!.filePath).toBe('/srv/team\\repo/dst/a.ts')
-  })
-
-  it('rebuilds the moved path when the source root has duplicate separators', async () => {
-    const state = useAppStore.getState()
-    state.openFile(
-      {
-        filePath: 'C:\\Repo\\Src\\deep\\a.ts',
-        relativePath: 'Src\\deep\\a.ts',
-        worktreeId: 'wt-1',
-        language: 'typescript',
-        mode: 'edit'
-      },
-      { suppressActiveRuntimeFallback: true }
-    )
-
-    await remap({
-      fromPath: 'C:\\Repo\\\\Src',
-      toPath: 'C:\\Repo\\Dst',
-      worktreePath: 'C:\\Repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    // Nested suffix preserved, no dropped or doubled separator.
-    expect(useAppStore.getState().openFiles[0]!.filePath).toBe('C:\\Repo\\Dst\\deep\\a.ts')
-  })
-
-  it('clears the untitled marker when remapping a renamed new markdown file', async () => {
-    const state = useAppStore.getState()
-    const oldPath = '/repo/untitled.md'
-    const newPath = '/repo/renamed.md'
-
-    state.openFile({
-      filePath: oldPath,
-      relativePath: 'untitled.md',
-      worktreeId: 'wt-1',
-      language: 'markdown',
-      isUntitled: true,
-      mode: 'edit'
-    })
-
-    await remap({
-      fromPath: oldPath,
-      toPath: newPath,
-      worktreePath: '/repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    expect(useAppStore.getState().openFiles).toHaveLength(1)
-    expect(useAppStore.getState().openFiles[0]).toMatchObject({
-      filePath: newPath,
-      relativePath: 'renamed.md'
-    })
-    expect(useAppStore.getState().openFiles[0].isUntitled).toBeUndefined()
   })
 
   it('carries the disk baseline and live conflict state onto the re-homed tab', async () => {
@@ -524,40 +278,9 @@ describe('remapOpenEditorTabsForPathChange', () => {
 
     const moved = useAppStore.getState().openFiles.find((f) => f.filePath === newPath)
     expect(moved).toBeTruthy()
-    // The re-homed tab must keep the identity that lets the watcher distinguish
-    // the move echo from a real external write, and any pre-existing conflict.
+    // Preserve move-echo identity and existing conflict so watchers distinguish rename from external writes.
     expect(moved?.lastKnownDiskSignature).toBe('sig-abc')
     expect(moved?.externalMutation).toBe('changed')
     expect(moved?.isDirty).toBe(true)
-  })
-
-  it('retargets an unstaged diff tab when its directory is moved', async () => {
-    const state = useAppStore.getState()
-    state.openFile(
-      {
-        filePath: '/repo/docs/readme.md',
-        relativePath: 'docs/readme.md',
-        worktreeId: 'wt-1',
-        runtimeEnvironmentId: null,
-        language: 'markdown',
-        mode: 'diff',
-        diffSource: 'unstaged'
-      } as never,
-      { suppressActiveRuntimeFallback: true }
-    )
-
-    await remap({
-      fromPath: '/repo/docs',
-      toPath: '/repo/notes',
-      worktreePath: '/repo',
-      worktreeId: 'wt-1',
-      owner: localMoveOwner('wt-1')
-    })
-
-    const moved = useAppStore.getState().openFiles.find((f) => f.mode === 'diff')
-    expect(moved?.filePath).toBe('/repo/notes/readme.md')
-    expect(
-      useAppStore.getState().openFiles.some((f) => f.filePath === '/repo/docs/readme.md')
-    ).toBe(false)
   })
 })

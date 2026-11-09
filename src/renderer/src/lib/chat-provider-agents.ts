@@ -1,12 +1,12 @@
-import { useSyncExternalStore } from 'react'
-import type { TuiAgent } from '../../../shared/tui-agent'
-import { isTuiAgent } from '../../../shared/tui-agent-config'
+import { useAppViewExternalStore } from '@/store/retained-views/app-state-view'
+import type { TuiAgent } from '../../../shared/agent-launch/catalog/tui-agent'
+import { isTuiAgent } from '../../../shared/agent-launch/catalog/tui-agent-config'
 import {
   hostStructuredAgentsVersion,
   readHostStructuredAgents,
   subscribeHostStructuredAgents,
   type HostStructuredAgentsStatuses
-} from '@/runtime/host-structured-agents'
+} from '@/runtime/native-chat/agent-catalogs/host-structured-agents'
 
 const BUILT_IN_CHAT_AGENTS: readonly TuiAgent[] = ['claude', 'codex']
 
@@ -24,9 +24,8 @@ export function chatProviderAgents(
   ]
 }
 
-/** Re-renders the caller whenever a host's chat agent list changes. */
 export function useHostStructuredAgentsVersion(): number {
-  return useSyncExternalStore(
+  return useAppViewExternalStore(
     subscribeHostStructuredAgents,
     hostStructuredAgentsVersion,
     hostStructuredAgentsVersion
