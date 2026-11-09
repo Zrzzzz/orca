@@ -1,0 +1,91 @@
+name: Sync upstream main
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'Zrzzzz/orca'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      SYNC_BRANCH: automation/upstream-main
+    steps:
+      - name: Require a token that triggers PR checks
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::error::Set UPSTREAM_SYNC_TOKEN; see docs/reference/upstream-sync.md.'
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+      - name: Merge upstream into the synchronization branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'orca-upstream-sync'
+          git config user.email 'orca-upstream-sync@users.noreply.github.com'
+          git fetch https://github.com/stablyai/orca.git main
+          upstream_sha=$(git rev-parse FETCH_HEAD)
+          if git merge-base --is-ancestor "$upstream_sha" origin/main; then
+            echo 'Fork main already contains upstream main.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$SYNC_BRANCH"; then
+            git fetch origin "$SYNC_BRANCH"
+            git checkout -B "$SYNC_BRANCH" FETCH_HEAD
+          else
+            git checkout -b "$SYNC_BRANCH" origin/main
+          fi
+          for revision in origin/main "$upstream_sha"; do
+            if ! git merge --no-edit "$revision"; then
+              echo '### Upstream sync needs conflict resolution' >> "$GITHUB_STEP_SUMMARY"
+              git diff --name-only --diff-filter=U >> "$GITHUB_STEP_SUMMARY"
+              git merge --abort
+              exit 1
+            fi
+          done
+          git push origin "HEAD:refs/heads/$SYNC_BRANCH"
+          pr=$(gh pr list --base main --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            gh pr create --base main --head "$SYNC_BRANCH" \
+              --title 'chore: sync upstream main' \
+              --body 'Merge stablyai/orca main while preserving fork changes. The scheduled sync merges this PR only after PR Checks and its aggregate gate pass for the current head. Conflicts require manual resolution.'
+          fi
+      - name: Merge only a verified synchronization PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --base main --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then exit 0; fi
+          sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+          run=$(gh run list --workflow pr.yml --branch "$SYNC_BRANCH" --event pull_request \
+            --commit "$sha" --limit 1 --json databaseId,status,conclusion)
+          run_id=$(jq -r '.[0] | select(.status == "completed" and .conclusion == "success") | .databaseId // empty' <<< "$run")
+          if [ -z "$run_id" ]; then
+            echo "PR #$pr is waiting for successful PR Checks; retrying next hour." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh api --paginate "repos/$GH_REPO/actions/runs/$run_id/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name == "PR checks passed" and .conclusion == "success") | .id' > "$RUNNER_TEMP/sync-gate"
+          if [ ! -s "$RUNNER_TEMP/sync-gate" ]; then
+            echo '::error::PR Checks did not publish a successful aggregate gate.'
+            exit 1
+          fi
+          gh pr checks "$pr"
+          gh pr merge "$pr" --merge --match-head-commit "$sha" --delete-branch
+          echo "Merged upstream synchronization PR #$pr." >> "$GITHUB_STEP_SUMMARY"
