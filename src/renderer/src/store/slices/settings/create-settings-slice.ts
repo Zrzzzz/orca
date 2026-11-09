@@ -135,6 +135,7 @@ async function persistSettingsUpdates(
   supportedRuntimeEnvironmentId: string | null,
   sourceDefaultsSupportedRuntimeEnvironmentId: string | null,
   shouldPublish: () => boolean,
+  writeSettings: (updates: Partial<GlobalSettings>) => Promise<GlobalSettings>,
   onAcknowledged?: (settings: GlobalSettings) => void
 ): Promise<void> {
   const normalizedUpdates = normalizeSettingsUpdates(updates, currentSettings)
@@ -145,6 +146,7 @@ async function persistSettingsUpdates(
     sourceDefaultsSupportedRuntimeEnvironmentId,
     shouldPublish,
     onAcknowledged,
+    writeSettings,
     set
   })
 }
@@ -211,7 +213,8 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
         get().settings,
         get().worktreeVisibilityDefaultsSupportedRuntimeEnvironmentId,
         get().worktreeVisibilitySourceDefaultsSupportedRuntimeEnvironmentId,
-        shouldPublish
+        shouldPublish,
+        get().persistWorkspaceViewSettings
       )
       if ('worktreeVisibilityDefaults' in updates) {
         await get().fetchAllWorktrees({ visibilityOwnerHostId })
@@ -233,6 +236,7 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
       get().worktreeVisibilityDefaultsSupportedRuntimeEnvironmentId,
       get().worktreeVisibilitySourceDefaultsSupportedRuntimeEnvironmentId,
       shouldPublish,
+      get().persistWorkspaceViewSettings,
       onAcknowledged
     )
     if ('worktreeVisibilityDefaults' in updates) {

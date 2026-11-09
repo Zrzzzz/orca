@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand'
+import { createWorkspaceViewSyncActions } from './workspace-view-sync'
 import type { AppState } from '../../types'
 import type { UISlice } from './ui-slice-contract'
 import { createUiAgentActions } from './ui-slice-agent-actions'
@@ -16,6 +17,7 @@ import { createUiHydrationActions } from './ui-slice-hydration-actions'
 import { createUiUpdateActions } from './ui-slice-update-actions'
 
 export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) =>
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The factories below collectively provide the UI contract; legacy factories expose Partial<UISlice>.
   ({
     ...createUiAgentActions(set, get),
     ...createUiTaskActions(set, get),
@@ -28,6 +30,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     ...createUiPreferenceActions(set, get),
     ...createUiSurfaceActions(set, get),
     ...createUiPersistenceActions(set, get),
+    ...createWorkspaceViewSyncActions(set, get),
     ...createUiHydrationActions(set, get),
     ...createUiUpdateActions(set, get)
   }) as UISlice

@@ -46,7 +46,7 @@ export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Par
     groupBy: 'repo',
     // Why: group keys are mode-specific, so clear collapsed state on mode switch — stale keys are meaningless and accumulate.
     setGroupBy: (g) => {
-      window.api.ui.set({ groupBy: g, collapsedGroups: [] }).catch(console.error)
+      get().persistWorkspaceViewUI({ groupBy: g, collapsedGroups: [] }).catch(console.error)
       set({ groupBy: g, collapsedGroups: new Set<string>() })
     },
 
@@ -178,6 +178,8 @@ export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Par
     worktreeCardProperties: [...DEFAULT_WORKTREE_CARD_PROPERTIES],
     _worktreeCardModeDefaulted: true,
     setWorktreeCardMode: (mode) => {
+      const owner = get().settings?.activeRuntimeEnvironmentId
+      const epoch = get().workspaceViewSync.epoch
       const updates = getWorktreeCardModeUpdates(mode)
       set((s) => ({
         settings: s.settings ? { ...s.settings, ...updates.settings } : s.settings,
@@ -185,19 +187,28 @@ export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Par
         _worktreeCardModeDefaulted: true
       }))
       void Promise.all([
-        window.api.settings.set(updates.settings).then((nextSettings) => {
-          if (nextSettings) {
-            set({ settings: nextSettings })
-          }
-        }),
-        window.api.ui.set(updates.ui)
+        get()
+          .persistWorkspaceViewSettings(updates.settings)
+          .then((nextSettings) => {
+            if (
+              nextSettings &&
+              get().settings?.activeRuntimeEnvironmentId === owner &&
+              get().workspaceViewSync.epoch === epoch
+            ) {
+              set({ settings: nextSettings })
+            }
+          }),
+        get().persistWorkspaceViewUI(updates.ui)
       ]).catch(console.error)
     },
     setWorktreeCardProperties: (properties) => {
       const normalized = normalizeWorktreeCardProperties(properties)
       set({ worktreeCardProperties: normalized, _worktreeCardModeDefaulted: false })
-      window.api.ui
-        .set({ worktreeCardProperties: normalized, _worktreeCardModeDefaulted: false })
+      get()
+        .persistWorkspaceViewUI({
+          worktreeCardProperties: normalized,
+          _worktreeCardModeDefaulted: false
+        })
         .catch(console.error)
     },
     showAgentModels: true,
@@ -208,7 +219,7 @@ export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Par
     agentActivityDisplayMode: DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE,
     setAgentActivityDisplayMode: (mode) => {
       const normalized = normalizeAgentActivityDisplayMode(mode)
-      window.api.ui.set({ agentActivityDisplayMode: normalized }).catch(console.error)
+      get().persistWorkspaceViewUI({ agentActivityDisplayMode: normalized }).catch(console.error)
       set({ agentActivityDisplayMode: normalized })
     },
 

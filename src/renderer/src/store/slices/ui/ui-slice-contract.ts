@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand'
+import type { WorkspaceViewSyncSlice } from './workspace-view-sync'
 import type { AppState } from '../../types'
 import type { UISliceCore } from './ui-slice-contract-core'
 import type { UISliceContextual } from './ui-slice-contract-contextual'
@@ -25,7 +26,8 @@ export type {
   UISliceSurfaces
 } from './ui-slice-contract-preferences'
 
-export type UISlice = UISliceCore &
+export type UISlice = WorkspaceViewSyncSlice &
+  UISliceCore &
   UISliceContextual &
   UISlicePreferences &
   UISliceSurfaces &

@@ -125,8 +125,8 @@ export function registerRuntimeClientIpcBridge(
       applyNativeChatLaunchDraftResolved(useAppStore.getState(), event)
       return
     }
-    // A paired desktop keeps its own Workspace options; it reads only the host's columns, for the host's cards.
     if (event.type === 'workspaceViewChanged') {
+      void useAppStore.getState().refreshWorkspaceView(environmentId)
       void useAppStore.getState().fetchHostWorkspaceStatuses(environmentId)
       return
     }

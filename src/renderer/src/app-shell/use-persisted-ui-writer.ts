@@ -54,13 +54,21 @@ function createPersistedUIWriteController(): PersistedUIWriteController {
     }
     const fields = Object.keys(changed) as (keyof PersistedUIWriteBaseline)[]
     const state = useAppStore.getState()
+    const owner = state.settings?.activeRuntimeEnvironmentId ?? null
+    const epoch = state.workspaceViewSync.epoch
+    const isCurrent = (): boolean => {
+      const current = useAppStore.getState()
+      return (
+        (current.settings?.activeRuntimeEnvironmentId ?? null) === owner &&
+        current.workspaceViewSync.epoch === epoch
+      )
+    }
     const sentAtGeneration = state.persistedUIWriteBaselineGeneration
     state.notePersistedUIWriteStarted(fields)
     let request: Promise<void>
     try {
       // Use acknowledged writes when available; older preloads fall back to set, which web may silently reject.
-      const send = window.api.ui.setWithAck ?? window.api.ui.set
-      request = send(persistedUIWriteFieldsToWireUpdate(changed))
+      request = state.persistWorkspaceViewUI(persistedUIWriteFieldsToWireUpdate(changed))
     } catch {
       // Settle even synchronous failure so fields cannot stay pinned against hydration forever.
       useAppStore.getState().notePersistedUIWriteSettled(fields, null)
@@ -69,10 +77,16 @@ function createPersistedUIWriteController(): PersistedUIWriteController {
     // Use two-argument then so an ack-handler throw cannot trigger double settlement in the rejection branch.
     request.then(
       () => {
+        if (!isCurrent()) {
+          return
+        }
         useAppStore.getState().notePersistedUIWriteSettled(fields, changed, { sentAtGeneration })
         scheduleTrailing()
       },
       () => {
+        if (!isCurrent()) {
+          return
+        }
         useAppStore.getState().notePersistedUIWriteSettled(fields, null)
         // Flush newer pending edits, not the rejected patch itself; terminal failures must not loop.
         const state = useAppStore.getState()
@@ -119,6 +133,10 @@ export function usePersistedUIWriter(): void {
   const controller = useMemo(() => createPersistedUIWriteController(), [])
   const persistedUIReady = useAppStore((s) => s.persistedUIReady)
   const activeView = useAppStore((s) => s.activeView)
+  const owner = useAppStore((s) => s.settings?.activeRuntimeEnvironmentId ?? null)
+  const viewReady = useAppStore(
+    (s) => !owner || (s.workspaceViewSync.owner === owner && s.workspaceViewSync.ready)
+  )
   const ui = useAppStore(
     useShallow((s): PersistedUIWriteBaseline => ({
       gitGraphFiltersByWorktree: s.gitGraphFiltersByWorktree,
@@ -160,7 +178,7 @@ export function usePersistedUIWriter(): void {
   useEffect(() => {
     // Diff against last hydration plus flushed writes; never echo unchanged remote fields. Read baseline via getState so broadcasts cannot rerender/rearm this debounce.
     const armBaseline = useAppStore.getState().persistedUIWriteBaseline
-    if (!persistedUIReady || !armBaseline) {
+    if (!persistedUIReady || !armBaseline || !viewReady) {
       return
     }
     if (Object.keys(diffPersistedUIWriteFields(ui, armBaseline)).length === 0) {
@@ -181,7 +199,7 @@ export function usePersistedUIWriter(): void {
     }, 150)
 
     return () => window.clearTimeout(timer)
-  }, [controller, persistedUIReady, ui])
+  }, [controller, persistedUIReady, ui, owner, viewReady])
 
   // activeView uses a tiny profile preference rather than the multi-MB durable writer (#9002).
   useEffect(() => {

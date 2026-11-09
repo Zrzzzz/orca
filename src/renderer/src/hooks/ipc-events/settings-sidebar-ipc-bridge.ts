@@ -121,6 +121,9 @@ export function registerSettingsAndSidebarIpcBridge(unsubs: (() => void)[]): voi
         settings: {
           ...store.settings,
           ...settingsUpdates,
+          ...(store.settings.activeRuntimeEnvironmentId === store.workspaceViewSync?.owner
+            ? store.workspaceViewSync.settings
+            : {}),
           notifications: {
             ...store.settings.notifications,
             ...updates.notifications
@@ -144,7 +147,8 @@ export function registerSettingsAndSidebarIpcBridge(unsubs: (() => void)[]): voi
   // Why: UI view-state is shared with mobile via ui.set; re-hydrate so mobile changes reflect live in the desktop sidebar.
   unsubs.push(
     window.api.ui.onStateChanged((ui) => {
-      useAppStore.getState().hydratePersistedUI(ui, 'sync')
+      const state = useAppStore.getState()
+      state.hydratePersistedUI(state.projectWorkspaceViewUI(ui), 'sync')
     })
   )
 
